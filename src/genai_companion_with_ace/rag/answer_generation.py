@@ -42,6 +42,20 @@ class OutlineSection:
     bullets: list[str]
 
 
+@dataclass(slots=True)
+class OutlineContext:
+    sections: list[OutlineSection]
+    outline_text: str
+    key_points: list[str]
+    target_words: int
+
+
+@dataclass(slots=True)
+class GenerationParams:
+    max_tokens: int
+    temperature: float
+
+
 class AnswerGenerator:
     """Generates grounded answers using retrieved context and ACE playbooks."""
 
@@ -78,100 +92,30 @@ class AnswerGenerator:
         self._last_retrieval: RetrievalResult | None = None
 
     def generate(self, processed_query: ProcessedQuery) -> FormattedResponse:
-        retrieval_result = self._retrieval.retrieve(
-            processed_query.user_message.content,
-            attachments=processed_query.attachments,
+        retrieval_result = self._perform_retrieval(processed_query)
+        detail_requested = self._is_detail_requested(processed_query)
+        outline_context = self._build_outline_context(
+            processed_query,
+            retrieval_result,
+            detail_requested,
         )
-        self._last_retrieval = retrieval_result
-
-        detail_requested = processed_query.metadata.get("detail_level") == "deep"
-        outline_sections: list[OutlineSection] = []
-        outline_text = ""
-        key_points: list[str] = []
-        target_words = self._resolve_target_words(processed_query)
-        if detail_requested:
-            key_points = self._summarize_retrieval_for_outline(retrieval_result)
-            outline_sections = self._generate_outline(processed_query, key_points)
-            outline_text = self._format_outline_for_prompt(outline_sections)
-
         prompt = self._build_prompt(
             processed_query,
             retrieval_result,
             detail_requested=detail_requested,
-            outline_text=outline_text,
-            key_points=key_points,
-            target_words=target_words if detail_requested else None,
+            outline_text=outline_context.outline_text,
+            key_points=outline_context.key_points,
+            target_words=outline_context.target_words if detail_requested else None,
         )
-        LOGGER.debug(
-            "Deep-dive=%s session=%s mode=%s max_tokens=%s temperature=%s prompt_len=%d chars",
+        params = self._resolve_generation_params(detail_requested)
+        self._log_prompt_stats(processed_query, detail_requested, params, prompt)
+        answer = self._invoke_llm(
+            prompt,
+            processed_query,
+            outline_context,
+            params,
             detail_requested,
-            processed_query.session.session_id,
-            processed_query.mode.value,
-            max_tokens,
-            0.1 if detail_requested else self._config.temperature,
-            len(prompt),
         )
-
-        max_tokens = self._config.max_tokens
-        if detail_requested:
-            max_tokens = int(max_tokens * 1.5)
-        temperature = 0.25 if detail_requested else self._config.temperature
-
-        llm_client = self._select_llm(detail_requested)
-        try:
-            answer = llm_client.generate(
-                prompt,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
-            if detail_requested and outline_sections:
-                missing_sections = self._missing_outline_sections(answer, outline_sections)
-                if missing_sections:
-                    answer = self._continue_outline_sections(
-                        answer,
-                        processed_query,
-                        missing_sections,
-                        temperature=temperature,
-                        max_tokens=max_tokens // 2,
-                    )
-        except requests.exceptions.ConnectionError as exc:
-            if "localhost:11434" in str(exc) or "11434" in str(exc):
-                message = (
-                    "❌ Ollama is not running!\n\n"
-                    "Please start Ollama before using the companion:\n"
-                    "  1. Open a terminal and run: ollama serve\n"
-                    "  2. Or start Ollama from your applications\n"
-                    "  3. Verify it's running: ollama list\n\n"
-                    "For more information, visit: https://ollama.com/"
-                )
-            else:
-                message = f"Failed to connect to LLM service: {exc}"
-            raise GenerationError(message) from exc
-        except Exception as exc:  # pragma: no cover - LLM errors
-            error_str = str(exc)
-            # Check for 404 errors (model not found)
-            if "404" in error_str or "not found" in error_str.lower():
-                # Try to extract model name from error or config
-                model_hint = "llama3.1:8b"  # default
-                if "pull" in error_str:
-                    # Extract model name from error message like "ollama pull llama3.1:8b"
-                    import re
-                    match = re.search(r"pull\s+([^\s`]+)", error_str)
-                    if match:
-                        model_hint = match.group(1)
-                
-                message = (
-                    f"❌ Model not found!\n\n"
-                    f"The required model is not installed in Ollama.\n\n"
-                    f"To install the model:\n"
-                    f"  Run: ollama pull {model_hint}\n\n"
-                    f"This will download the model (may take several minutes).\n"
-                    f"After installation, try your question again.\n\n"
-                    f"To see installed models: ollama list"
-                )
-            else:
-                message = f"Failed to generate answer: {exc}"
-            raise GenerationError(message) from exc
 
         citations = self._build_citations(retrieval_result)
         formatted = self._formatter.format_answer(
@@ -219,6 +163,146 @@ class AnswerGenerator:
             self._check_and_trigger_ace_cycles()
 
         return formatted
+
+    def _perform_retrieval(self, processed_query: ProcessedQuery) -> RetrievalResult:
+        retrieval_result = self._retrieval.retrieve(
+            processed_query.user_message.content,
+            attachments=processed_query.attachments,
+        )
+        self._last_retrieval = retrieval_result
+        return retrieval_result
+
+    @staticmethod
+    def _is_detail_requested(processed_query: ProcessedQuery) -> bool:
+        return processed_query.metadata.get("detail_level") == "deep"
+
+    def _build_outline_context(
+        self,
+        processed_query: ProcessedQuery,
+        retrieval_result: RetrievalResult,
+        detail_requested: bool,
+    ) -> OutlineContext:
+        target_words = self._resolve_target_words(processed_query)
+        if not detail_requested:
+            return OutlineContext([], "", [], target_words)
+        key_points = self._summarize_retrieval_for_outline(retrieval_result)
+        outline_sections = self._generate_outline(processed_query, key_points)
+        outline_text = self._format_outline_for_prompt(outline_sections)
+        return OutlineContext(outline_sections, outline_text, key_points, target_words)
+
+    def _resolve_generation_params(self, detail_requested: bool) -> GenerationParams:
+        max_tokens = self._config.max_tokens
+        if detail_requested:
+            max_tokens = int(max_tokens * 1.5)
+        temperature = 0.25 if detail_requested else self._config.temperature
+        return GenerationParams(max_tokens=max_tokens, temperature=temperature)
+
+    def _log_prompt_stats(
+        self,
+        processed_query: ProcessedQuery,
+        detail_requested: bool,
+        params: GenerationParams,
+        prompt: str,
+    ) -> None:
+        LOGGER.debug(
+            "Deep-dive=%s session=%s mode=%s max_tokens=%s temperature=%s prompt_len=%d chars",
+            detail_requested,
+            processed_query.session.session_id,
+            processed_query.mode.value,
+            params.max_tokens,
+            params.temperature,
+            len(prompt),
+        )
+
+    def _invoke_llm(
+        self,
+        prompt: str,
+        processed_query: ProcessedQuery,
+        outline_context: OutlineContext,
+        params: GenerationParams,
+        detail_requested: bool,
+    ) -> str:
+        llm_client = self._select_llm(detail_requested)
+        try:
+            answer = llm_client.generate(
+                prompt,
+                temperature=params.temperature,
+                max_tokens=params.max_tokens,
+            )
+            if detail_requested and outline_context.sections:
+                missing_sections = self._missing_outline_sections(answer, outline_context.sections)
+                if missing_sections:
+                    answer = self._continue_outline_sections(
+                        answer,
+                        processed_query,
+                        missing_sections,
+                        temperature=temperature,
+                        max_tokens=max(256, params.max_tokens // 2),
+                    )
+        except requests.exceptions.ConnectionError as exc:
+            if "localhost:11434" in str(exc) or "11434" in str(exc):
+                message = (
+                    "❌ Ollama is not running!\n\n"
+                    "Please start Ollama before using the companion:\n"
+                    "  1. Open a terminal and run: ollama serve\n"
+                    "  2. Or start Ollama from your applications\n"
+                    "  3. Verify it's running: ollama list\n\n"
+                    "For more information, visit: https://ollama.com/"
+                )
+            else:
+                message = f"Failed to connect to LLM service: {exc}"
+            raise GenerationError(message) from exc
+        except Exception as exc:  # pragma: no cover - LLM errors
+            error_str = str(exc)
+            # Check for 404 errors (model not found)
+            if "404" in error_str or "not found" in error_str.lower():
+                # Try to extract model name from error or config
+                model_hint = "llama3.1:8b"  # default
+                if "pull" in error_str:
+                    # Extract model name from error message like "ollama pull llama3.1:8b"
+                    import re
+                    match = re.search(r"pull\s+([^\s`]+)", error_str)
+                    if match:
+                        model_hint = match.group(1)
+                
+                message = (
+                    f"❌ Model not found!\n\n"
+                    f"The required model is not installed in Ollama.\n\n"
+                    f"To install the model:\n"
+                    f"  Run: ollama pull {model_hint}\n\n"
+                    f"This will download the model (may take several minutes).\n"
+                    f"After installation, try your question again.\n\n"
+                    f"To see installed models: ollama list"
+                )
+            else:
+                message = f"Failed to generate answer: {exc}"
+            raise GenerationError(message) from exc
+        except Exception as exc:  # pragma: no cover - LLM errors
+            error_str = str(exc)
+            # Check for 404 errors (model not found)
+            if "404" in error_str or "not found" in error_str.lower():
+                # Try to extract model name from error or config
+                model_hint = "llama3.1:8b"  # default
+                if "pull" in error_str:
+                    # Extract model name from error message like "ollama pull llama3.1:8b"
+                    import re
+                    match = re.search(r"pull\s+([^\s`]+)", error_str)
+                    if match:
+                        model_hint = match.group(1)
+                
+                message = (
+                    f"❌ Model not found!\n\n"
+                    f"The required model is not installed in Ollama.\n\n"
+                    f"To install the model:\n"
+                    f"  Run: ollama pull {model_hint}\n\n"
+                    f"This will download the model (may take several minutes).\n"
+                    f"After installation, try your question again.\n\n"
+                    f"To see installed models: ollama list"
+                )
+            else:
+                message = f"Failed to generate answer: {exc}"
+            raise GenerationError(message) from exc
+        return answer
 
     def _check_and_trigger_ace_cycles(self) -> None:
         """Check if threshold is reached and automatically trigger ACE cycles if needed."""
@@ -472,11 +556,11 @@ class AnswerGenerator:
                     outline.append(OutlineSection(title=title, bullets=bullets[:3]))
             if outline:
                 return outline
-        except Exception:  # pragma: no cover - fallback parse
-            pass
+        except Exception as exc:  # pragma: no cover - fallback parse
+            LOGGER.debug("Failed to parse outline JSON; falling back to plain-text outline: %s", exc)
         # Fallback simple outline by splitting lines
         outline: list[OutlineSection] = []
-        for idx, line in enumerate(response.splitlines()):
+        for _idx, line in enumerate(response.splitlines()):
             line = line.strip("-* \t")
             if not line:
                 continue

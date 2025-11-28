@@ -4,15 +4,21 @@ from __future__ import annotations
 
 import argparse
 import json
-import random
 import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+import hashlib
+import sys
+
 DEFAULT_QUESTIONS = Path("data/ace/questions_genai.json")
 DEFAULT_OUTPUT_DIR = Path("outputs/ace_datasets")
+
+
+class DatasetBuildError(RuntimeError):
+    """Raised when curated question data is missing or invalid."""
 
 
 def parse_args() -> argparse.Namespace:
@@ -46,10 +52,10 @@ def parse_args() -> argparse.Namespace:
 
 def load_questions(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
-        raise FileNotFoundError(f"Questions file not found: {path}")
+        raise DatasetBuildError(f"Questions file not found: {path}")
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, list) or not data:
-        raise ValueError("Questions file must be a non-empty JSON array.")
+        raise DatasetBuildError("Questions file must be a non-empty JSON array.")
     return data
 
 
@@ -108,11 +114,20 @@ def resolve_output_path(explicit: Path | None) -> Path:
 
 def main() -> None:
     args = parse_args()
-    questions = load_questions(args.questions)
+    try:
+        questions = load_questions(args.questions)
+    except DatasetBuildError as exc:
+        print(f"Failed to load questions: {exc}", file=sys.stderr)
+        sys.exit(1)
 
     if args.shuffle_seed is not None:
-        rng = random.Random(args.shuffle_seed)
-        rng.shuffle(questions)
+        seed_bytes = str(args.shuffle_seed).encode("utf-8")
+        keyed = [
+            (hashlib.sha256(seed_bytes + str(idx).encode("utf-8")).digest(), question)
+            for idx, question in enumerate(questions)
+        ]
+        keyed.sort(key=lambda item: item[0])
+        questions = [entry for _, entry in keyed]
 
     if args.limit is not None:
         questions = questions[: args.limit]

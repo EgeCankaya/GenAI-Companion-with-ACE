@@ -48,7 +48,7 @@ def _check_python_version() -> DiagnosticResult:
         return DiagnosticResult("ok", f"Python {platform.python_version()} detected.")
     return DiagnosticResult(
         "warn",
-        f"Python {platform.python_version()} detected; project recommends 3.9–3.13.",
+        f"Python {platform.python_version()} detected; project recommends 3.9-3.13.",
     )
 
 

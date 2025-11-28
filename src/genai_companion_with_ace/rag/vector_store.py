@@ -6,6 +6,7 @@ import logging
 import shutil
 import uuid
 from collections.abc import Iterable, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -86,41 +87,12 @@ class VectorStoreManager:
 
     def reset(self) -> None:
         """Drop the existing vector store collection and start fresh.
-        
-        Handles corrupted databases gracefully by catching exceptions during cleanup.
+
+        Ensures Chroma releases file handles before deleting on-disk artifacts to avoid
+        DuckDB \"readonly database\" errors observed in CI.
         """
-        # Try to clean up the in-memory store first
-        if self._store is not None:
-            if hasattr(self._store, "delete_collection"):
-                try:
-                    self._store.delete_collection()
-                except Exception as e:  # pragma: no cover - defensive cleanup
-                    LOGGER.warning("Chroma collection deletion failed (may be corrupted): %s", e)
-            self._store = None
-        
-        # Remove the persisted directory, handling corruption gracefully
-        persist_path = self._config.persist_directory
-        if persist_path.exists():
-            LOGGER.info("Removing persisted vector store at %s", persist_path)
-            try:
-                shutil.rmtree(persist_path, ignore_errors=True)
-            except Exception as e:
-                LOGGER.warning("Error removing vector store directory (may be corrupted): %s", e)
-                # Try to remove individual files if directory removal fails
-                try:
-                    for item in persist_path.iterdir():
-                        try:
-                            if item.is_dir():
-                                shutil.rmtree(item, ignore_errors=True)
-                            else:
-                                item.unlink(missing_ok=True)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-        
-        # Ensure directory exists for re-initialization
-        persist_path.mkdir(parents=True, exist_ok=True)
+        self._dispose_store()
+        self._clean_persist_directory()
         LOGGER.info("Vector store reset complete. Ready for re-initialization.")
 
     def check_health(self) -> tuple[bool, str | None]:
@@ -165,4 +137,49 @@ class VectorStoreManager:
                 embedding_function=self._embeddings,
             )
         return self._store
+
+    def _dispose_store(self) -> None:
+        """Release Chroma resources before deleting files on disk."""
+        store = self._store
+        if store is None:
+            return
+        delete_collection = getattr(store, "delete_collection", None)
+        if callable(delete_collection):
+            try:
+                delete_collection()
+            except Exception as exc:  # pragma: no cover - defensive cleanup
+                LOGGER.warning("Chroma collection deletion failed (may be corrupted): %s", exc)
+        client = getattr(store, "_client", None)
+        if client is not None:
+            for method_name in ("persist", "reset", "close"):
+                method = getattr(client, method_name, None)
+                if callable(method):
+                    with suppress(Exception):  # pragma: no cover - best effort cleanup
+                        method()
+            system = getattr(client, "_system", None)
+            stop = getattr(system, "stop", None)
+            if callable(stop):
+                with suppress(Exception):
+                    stop()
+        self._store = None
+
+    def _clean_persist_directory(self) -> None:
+        """Delete and recreate the persistence directory with robust logging."""
+        persist_path = self._config.persist_directory
+        if persist_path.exists():
+            LOGGER.info("Removing persisted vector store at %s", persist_path)
+            try:
+                shutil.rmtree(persist_path)
+            except Exception as exc:
+                LOGGER.warning("Error removing vector store directory (may be corrupted): %s", exc)
+                if persist_path.exists():
+                    for item in persist_path.iterdir():
+                        try:
+                            if item.is_dir():
+                                shutil.rmtree(item)
+                            else:
+                                item.unlink()
+                        except Exception as inner_exc:
+                            LOGGER.debug("Failed removing %s: %s", item, inner_exc)
+        persist_path.mkdir(parents=True, exist_ok=True)
 

@@ -30,6 +30,10 @@ DEFAULT_CONFIG = Path("configs/companion_config.yaml")
 RUN_REPORT_DIR = Path("outputs/ace_runs")
 
 
+class DatasetLoadError(RuntimeError):
+    """Raised when the ACE dataset file is missing or malformed."""
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run ACE iterations using a prepared dataset.")
     parser.add_argument(
@@ -55,10 +59,10 @@ def parse_args() -> argparse.Namespace:
 
 def load_dataset(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
-        raise FileNotFoundError(f"Dataset file not found: {path}")
+        raise DatasetLoadError(f"Dataset file not found: {path}")
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, list) or not data:
-        raise ValueError("Dataset must be a non-empty JSON array")
+        raise DatasetLoadError("Dataset must be a non-empty JSON array")
     return data
 
 
@@ -159,7 +163,11 @@ def write_report(
 
 def main() -> None:
     args = parse_args()
-    dataset = load_dataset(args.dataset)
+    try:
+        dataset = load_dataset(args.dataset)
+    except DatasetLoadError as exc:
+        print(f"Invalid dataset: {exc}", file=sys.stderr)
+        sys.exit(1)
     dataset_count = len(dataset)
     dataset_hash = dataset_sha256(args.dataset)
     trigger_config, loader = load_trigger_config(args.config, args.iterations)

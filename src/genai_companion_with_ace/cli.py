@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import socket
 import uuid
 import shutil
@@ -16,6 +17,7 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Prompt
+from rich.text import Text
 
 from genai_companion_with_ace.ace_integration import ACETriggerConfig, ConversationLogger, PlaybookLoader, run_ace_cycles
 from genai_companion_with_ace.app.bootstrap import RuntimeComponents, load_runtime_from_path
@@ -28,6 +30,7 @@ from genai_companion_with_ace.rag import (
     DocumentIngestionPipeline,
     EmbeddingFactory,
     GenerationError,
+    VectorStoreConfig,
     VectorStoreManager,
 )
 from genai_companion_with_ace.evaluation import (
@@ -39,6 +42,15 @@ from genai_companion_with_ace.evaluation import (
 )
 
 console = Console()
+
+_BOX_CHARSETS = {
+    "simple": {"tl": "┌", "tr": "┐", "bl": "└", "br": "┘", "h": "─", "v": "│"},
+    "rounded": {"tl": "╭", "tr": "╮", "bl": "╰", "br": "╯", "h": "─", "v": "│"},
+}
+
+
+def _is_ace_framework_available() -> bool:
+    return importlib.util.find_spec("agentic_context_engineering.runners.ace_runner") is not None
 
 
 def perform_vector_store_reset(companion_config: CompanionConfig, *, force: bool) -> None:
@@ -55,9 +67,22 @@ def perform_vector_store_reset(companion_config: CompanionConfig, *, force: bool
         console.print("[yellow]Vector store directory does not exist. Nothing to reset.[/yellow]")
         return
 
-    embeddings = EmbeddingFactory(companion_config.embedding_settings()).build()
-    vector_store = VectorStoreManager(embeddings, vector_cfg)
+    vector_store = _build_vector_store_manager(companion_config, vector_cfg)
+    _report_vector_store_health(vector_store)
+    proceed, backup_dir = _maybe_backup_existing_store(persist_dir, force)
+    if not proceed:
+        return
+    _perform_store_reset(vector_store, backup_dir)
 
+
+def _build_vector_store_manager(
+    companion_config: CompanionConfig, vector_cfg: VectorStoreConfig
+) -> VectorStoreManager:
+    embeddings = EmbeddingFactory(companion_config.embedding_settings()).build()
+    return VectorStoreManager(embeddings, vector_cfg)
+
+
+def _report_vector_store_health(vector_store: VectorStoreManager) -> None:
     is_healthy, error_msg = vector_store.check_health()
     if is_healthy:
         console.print("[yellow]Warning: Vector store appears healthy. Reset may not be necessary.[/yellow]")
@@ -65,43 +90,47 @@ def perform_vector_store_reset(companion_config: CompanionConfig, *, force: bool
         console.print(f"[red]Vector store health check failed:[/red] {error_msg}")
     console.print()
 
-    backup_dir = None
-    if persist_dir.exists() and any(persist_dir.iterdir()):
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_dir = persist_dir.parent / f"{persist_dir.name}.backup.{timestamp}"
 
-        if not force:
-            console.print(f"[yellow]This will backup the existing store to:[/yellow]")
-            console.print(f"  [cyan]{backup_dir}[/cyan]")
-            console.print()
-            console.print("[yellow]After reset, you will need to re-ingest your documents.[/yellow]")
-            console.print()
-            if not click.confirm("Do you want to continue?"):
-                console.print("[yellow]Reset cancelled.[/yellow]")
-                return
+def _maybe_backup_existing_store(persist_dir: Path, force: bool) -> tuple[bool, Path | None]:
+    if not persist_dir.exists() or not any(persist_dir.iterdir()):
+        return True, None
 
-        try:
-            console.print(f"[dim]Creating backup...[/dim]")
-            shutil.copytree(persist_dir, backup_dir, dirs_exist_ok=True)
-            console.print(f"[green]Backup created:[/green] {backup_dir}")
-        except Exception as e:  # pragma: no cover - filesystem errors vary
-            console.print(f"[red]Warning: Failed to create backup:[/red] {e}")
-            if not force and not click.confirm("Continue without backup?"):
-                console.print("[yellow]Reset cancelled.[/yellow]")
-                return
-
-    try:
-        console.print(f"[dim]Resetting vector store...[/dim]")
-        vector_store.reset()
-        console.print("[green]Vector store reset successfully![/green]")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_dir = persist_dir.parent / f"{persist_dir.name}.backup.{timestamp}"
+    if not force:
+        console.print(f"[yellow]This will backup the existing store to:[/yellow]")
+        console.print(f"  [cyan]{backup_dir}[/cyan]")
         console.print()
+        console.print("[yellow]After reset, you will need to re-ingest your documents.[/yellow]")
+        console.print()
+        if not click.confirm("Do you want to continue?"):
+            console.print("[yellow]Reset cancelled.[/yellow]")
+            return False, None
+    try:
+        console.print("[dim]Creating backup...[/dim]")
+        shutil.copytree(persist_dir, backup_dir, dirs_exist_ok=True)
+        console.print(f"[green]Backup created:[/green] {backup_dir}")
+        return True, backup_dir
+    except Exception as exc:  # pragma: no cover - filesystem errors vary
+        console.print(f"[red]Warning: Failed to create backup:[/red] {exc}")
+        if force or click.confirm("Continue without backup?"):
+            return True, None
+        console.print("[yellow]Reset cancelled.[/yellow]")
+        return False, None
+
+
+def _perform_store_reset(vector_store: VectorStoreManager, backup_dir: Path | None) -> None:
+    try:
+        console.print("[dim]Resetting vector store...[/dim]")
+        vector_store.reset()
+        console.print("[green]Vector store reset successfully![/green]\n")
         console.print("[bold]Next steps:[/bold]")
         console.print("1. Re-ingest your documents using the ingestion pipeline")
         console.print("2. The vector store will be recreated automatically on first use")
         if backup_dir:
             console.print(f"3. Backup is available at: [cyan]{backup_dir}[/cyan]")
-    except Exception as e:  # pragma: no cover
-        console.print(f"[red]Error resetting vector store:[/red] {e}")
+    except Exception as exc:  # pragma: no cover
+        console.print(f"[red]Error resetting vector store:[/red] {exc}")
         if backup_dir and backup_dir.exists():
             console.print(f"[yellow]Backup is still available at:[/yellow] {backup_dir}")
 
@@ -140,12 +169,8 @@ def perform_trigger_ace(companion_config: CompanionConfig, *, iterations: int | 
     console.print(f"Running [cyan]{num_iterations}[/cyan] ACE iteration(s)...")
     console.print()
 
-    try:
-        from agentic_context_engineering.runners.ace_runner import ACERunner  # type: ignore
-        console.print("[green]ACE Framework:[/green] Available")
-    except ImportError as e:
+    if not _is_ace_framework_available():
         console.print("[red]Error: ACE framework not available.[/red]")
-        console.print(f"Import error: {e}")
         console.print()
         console.print("Make sure 'agentic-context-engineering' is installed:")
         console.print("  [cyan]pip install agentic-context-engineering[/cyan]")
@@ -153,6 +178,8 @@ def perform_trigger_ace(companion_config: CompanionConfig, *, iterations: int | 
         console.print("Or ensure the repository path is correct:")
         console.print(f"  [cyan]{trigger_config.repo_path}[/cyan]")
         return
+
+    console.print("[green]ACE Framework:[/green] Available")
 
     try:
         console.print("[dim]Running ACE cycles...[/dim]")
@@ -184,8 +211,8 @@ def perform_trigger_ace(companion_config: CompanionConfig, *, iterations: int | 
                     console.print(f"  Semantic Similarity: {perf_metrics.get('semantic_similarity', 0.0):.3f}")
                     console.print(f"  BLEU Score: {perf_metrics.get('bleu_score', 0.0):.4f}")
                     console.print(f"  ROUGE Score: {perf_metrics.get('rouge_score', 0.0):.4f}")
-            except Exception:
-                pass
+            except Exception as exc:  # pragma: no cover - best effort diagnostics
+                console.print(f"[yellow]Warning: Unable to read playbook metrics ({exc}).[/yellow]")
 
         console.print()
         console.print("[bold]Next steps:[/bold]")
@@ -210,6 +237,9 @@ def render_assistant_message(content: str, *, boxed: bool = True, box_style: str
     """Render assistant message with optional boxing that adapts to terminal width."""
     markdown = Markdown(content)
     if boxed:
+        if not console.is_terminal:
+            _render_boxed_fallback(content, box_style)
+            return
         box_styles = {
             "simple": box.SIMPLE,
             "rounded": box.ROUNDED,
@@ -277,6 +307,47 @@ def list_modes() -> str:
     }
     lines = [f"- {mode.value}: {desc}" for mode, desc in descriptions.items()]
     return "\n".join(lines)
+
+
+def _render_boxed_fallback(content: str, box_style: str) -> None:
+    """Render a unicode box manually when Rich falls back to plain text output."""
+    glyphs = _BOX_CHARSETS.get(box_style.lower(), _BOX_CHARSETS["simple"])
+    lines = content.splitlines() or [""]
+    size = getattr(console, "size", None)
+    available_width = getattr(console, "width", None) or (size.width if size else None) or 80
+    available_width = max(20, available_width)
+    title = " Companion "
+    max_line = max(len(line) for line in lines + [title.strip()])
+    inner_width = min(available_width - 2, max_line + 4)
+    inner_width = max(inner_width, len(title), 6)
+    content_width = max(1, inner_width - 2)
+
+    def wrap_line(text: str) -> list[str]:
+        if len(text) <= content_width:
+            return [text]
+        chunks: list[str] = []
+        remaining = text
+        while remaining:
+            chunks.append(remaining[:content_width])
+            remaining = remaining[content_width:]
+        return chunks
+
+    wrapped_lines: list[str] = []
+    for raw_line in lines:
+        wrapped_lines.extend(wrap_line(raw_line.rstrip()))
+    if not wrapped_lines:
+        wrapped_lines.append("")
+
+    top = f"{glyphs['tl']}{title.center(inner_width, glyphs['h'])}{glyphs['tr']}"
+    bottom = f"{glyphs['bl']}{glyphs['h'] * inner_width}{glyphs['br']}"
+
+    render_lines = [top]
+    for wrapped in wrapped_lines:
+        padded = wrapped.ljust(content_width)
+        render_lines.append(f"{glyphs['v']} {padded[:content_width]} {glyphs['v']}")
+    render_lines.append(bottom)
+
+    console.print(Text("\n".join(render_lines)))
 
 
 def handle_cli_command(
@@ -421,7 +492,6 @@ def cli() -> None:
 def chat(config_path: Path, session_id: str | None, mode: str, skip_ollama_check: bool) -> None:
     """Start an interactive chat session."""
     runtime = load_runtime_from_path(config_path)
-    companion_config = runtime.config
     
     # Check if Ollama is running and model is installed (if using Ollama provider)
     llm_settings = runtime.llm_settings
@@ -646,7 +716,6 @@ def chat(config_path: Path, session_id: str | None, mode: str, skip_ollama_check
                     
                     # Load and display playbook metrics
                     try:
-                        import yaml
                         playbook_data = yaml.safe_load(latest_path.read_text(encoding="utf-8"))
                         metadata = playbook_data.get("metadata", {})
                         perf_metrics = metadata.get("performance_metrics", {})
@@ -689,15 +758,13 @@ def chat(config_path: Path, session_id: str | None, mode: str, skip_ollama_check
                     except Exception as e:
                         console.print(f"   [yellow]Could not load playbook metrics: {e}[/yellow]")
                 
-                # Try to import ACE runner to verify it's available
-                try:
-                    from agentic_context_engineering.runners.ace_runner import ACERunner
-                    console.print(f"\n✅ [green]ACE Framework:[/green] Imported successfully")
-                    console.print(f"   Generator, Reflector, and Curator agents are available")
-                except ImportError as e:
-                    console.print(f"\n❌ [red]ACE Framework:[/red] Import failed")
-                    console.print(f"   Error: {e}")
-                    console.print(f"   Make sure 'agentic-context-engineering' is installed")
+                console.print("")
+                if _is_ace_framework_available():
+                    console.print("✅ [green]ACE Framework:[/green] Available")
+                    console.print("   Generator, Reflector, and Curator agents are available")
+                else:
+                    console.print("❌ [red]ACE Framework:[/red] Not installed")
+                    console.print("   Make sure 'agentic-context-engineering' is available on PYTHONPATH")
             else:
                 console.print(f"\n❌ [red]Playbook Loader:[/red] Not configured")
             

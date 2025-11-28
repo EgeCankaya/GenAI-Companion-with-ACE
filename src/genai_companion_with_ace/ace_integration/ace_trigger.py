@@ -8,18 +8,7 @@ import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
-
-
-@contextlib.contextmanager
-def _in_directory(path: Path):
-    old_cwd = Path.cwd()
-    os.chdir(path)
-    try:
-        yield
-    finally:
-        os.chdir(old_cwd)
-
+from typing import Any, Protocol
 
 from genai_companion_with_ace.ace_integration.conversation_logger import ConversationLogger
 from genai_companion_with_ace.ace_integration.playbook_loader import PlaybookContext, PlaybookLoader
@@ -46,8 +35,8 @@ class ACERunnerAdapter:
 
     def __init__(self, config: ACETriggerConfig) -> None:
         try:
-            from agentic_context_engineering.runners.ace_runner import ACERunner  # Lazy import
-            from agentic_context_engineering.utils import llm_client  # type: ignore
+            from agentic_context_engineering.runners.ace_runner import ACERunner  # type: ignore[import-not-found]
+            from agentic_context_engineering.utils import llm_client  # type: ignore[import-not-found]
         except ImportError as e:
             error_msg = (
                 f"ACE framework not available. Import error: {e}\n"
@@ -55,9 +44,9 @@ class ACERunnerAdapter:
             )
             raise ImportError(error_msg) from e
 
-        # Patch the ACE LLM client to allow CPU-only environments by skipping CUDA checks.
         if not hasattr(llm_client.LLMClient, "_genai_cpu_patch"):
-            def _skip_gpu_check(self):  # type: ignore
+
+            def _skip_gpu_check(self):
                 return None
 
             llm_client.LLMClient._verify_gpu = _skip_gpu_check  # type: ignore[attr-defined]
@@ -81,50 +70,53 @@ class ACERunnerAdapter:
         if not dataset:
             message = "ACE dataset must contain at least one conversation turn"
             raise ValueError(message)
+        tasks = [item["input"] for item in dataset]
         try:
-            tasks = [item["input"] for item in dataset]
             with _in_directory(self._repo_path):
                 results = self._runner.run_iterations(
-                    num_iterations=iterations, tasks=tasks, evaluation_dataset=dataset
+                    num_iterations=iterations,
+                    tasks=tasks,
+                    evaluation_dataset=dataset,
                 )
-            raw_playbook = results.get("final_playbook")
-
-            if raw_playbook is None:
-                return None
-
-            from agentic_context_engineering.playbook_schema import Playbook  # type: ignore
-
-            if isinstance(raw_playbook, str):
-                ace_playbook_path = Path(raw_playbook)
-            elif isinstance(raw_playbook, Playbook):
-                ace_playbook_path = (
-                    self._repo_path / "outputs" / f"playbook_v{raw_playbook.version}.yaml"
-                )
-                ace_playbook_path.parent.mkdir(parents=True, exist_ok=True)
-                raw_playbook.to_yaml(str(ace_playbook_path))
-            else:
-                raise RuntimeError(f"Unsupported playbook result type: {type(raw_playbook)!r}")
-
-            if not ace_playbook_path.is_absolute():
-                ace_playbook_path = self._repo_path / ace_playbook_path
-            
-            # Ensure output directory exists
-            playbook_output_dir.mkdir(parents=True, exist_ok=True)
-            
-            # If ACE generated playbook is not in our output directory, copy it there
-            if ace_playbook_path.parent != playbook_output_dir:
-                target_path = playbook_output_dir / ace_playbook_path.name
-                LOGGER.info("Copying ACE-generated playbook from %s to %s", ace_playbook_path, target_path)
-                shutil.copy2(ace_playbook_path, target_path)
-                return target_path
-            
-            return ace_playbook_path
         except Exception as e:
             error_msg = (
                 f"Error during ACE cycle execution: {e}\n"
                 "This may indicate issues with the ACE framework configuration or conversation data format."
             )
             raise RuntimeError(error_msg) from e
+
+        raw_playbook = results.get("final_playbook")
+        if raw_playbook is None:
+            return None
+
+        ace_playbook_path = self._materialize_playbook(raw_playbook)
+        return self._ensure_project_copy(ace_playbook_path, playbook_output_dir)
+
+    def _materialize_playbook(self, raw_playbook: Any) -> Path:
+        from agentic_context_engineering.playbook_schema import Playbook  # type: ignore[import-not-found]
+
+        if isinstance(raw_playbook, str):
+            ace_playbook_path = Path(raw_playbook)
+        elif isinstance(raw_playbook, Playbook):
+            ace_playbook_path = self._repo_path / "outputs" / f"playbook_v{raw_playbook.version}.yaml"
+            ace_playbook_path.parent.mkdir(parents=True, exist_ok=True)
+            raw_playbook.to_yaml(str(ace_playbook_path))
+        else:
+            raise TypeError(f"Unsupported playbook result type: {type(raw_playbook)!r}")
+
+        if not ace_playbook_path.is_absolute():
+            ace_playbook_path = self._repo_path / ace_playbook_path
+        return ace_playbook_path
+
+    def _ensure_project_copy(self, ace_playbook_path: Path, playbook_output_dir: Path) -> Path:
+        playbook_output_dir.mkdir(parents=True, exist_ok=True)
+        if ace_playbook_path.parent == playbook_output_dir:
+            return ace_playbook_path
+
+        target_path = playbook_output_dir / ace_playbook_path.name
+        LOGGER.info("Copying ACE-generated playbook from %s to %s", ace_playbook_path, target_path)
+        shutil.copy2(ace_playbook_path, target_path)
+        return target_path
 
 
 def run_ace_cycles(
@@ -160,4 +152,14 @@ def run_ace_cycles(
         LOGGER.warning("ACE did not produce a new playbook; reusing previous version.")
 
     return playbook_loader.load_latest()
+
+
+@contextlib.contextmanager
+def _in_directory(path: Path):
+    old_cwd = Path.cwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(old_cwd)
 

@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from genai_companion_with_ace.utils.time import utcnow_isoformat
 
@@ -45,7 +46,7 @@ class SessionHistoryStore:
         self._initialize()
 
     def _initialize(self) -> None:
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS sessions (
@@ -83,7 +84,7 @@ class SessionHistoryStore:
         mode: str | None = None,
     ) -> ConversationSession:
         created_at = utcnow_isoformat()
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 """
                 INSERT INTO sessions(session_id, created_at, user_id, course, mode)
@@ -96,7 +97,7 @@ class SessionHistoryStore:
         return ConversationSession(session_id=session_id, created_at=created_at, user_id=user_id, course=course, mode=mode)
 
     def append_message(self, session_id: str, message: Message) -> None:
-        with self._connect() as connection:
+        with self._connection() as connection:
             max_idx = connection.execute(
                 "SELECT COALESCE(MAX(idx), -1) FROM messages WHERE session_id = ?", (session_id,)
             ).fetchone()[0]
@@ -118,7 +119,7 @@ class SessionHistoryStore:
             connection.commit()
 
     def get_messages(self, session_id: str) -> list[Message]:
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 SELECT role, content, created_at, metadata
@@ -137,7 +138,7 @@ class SessionHistoryStore:
     def truncate_session(self, session_id: str, max_turns: int) -> None:
         if max_turns <= 0:
             return
-        with self._connect() as connection:
+        with self._connection() as connection:
             indices = [
                 row[0]
                 for row in connection.execute(
@@ -155,7 +156,7 @@ class SessionHistoryStore:
             connection.commit()
 
     def list_sessions(self, limit: int = 20) -> list[ConversationSession]:
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 SELECT session_id, created_at, user_id, course, mode, summary
@@ -178,7 +179,7 @@ class SessionHistoryStore:
         ]
 
     def get_session(self, session_id: str) -> ConversationSession | None:
-        with self._connect() as connection:
+        with self._connection() as connection:
             row = connection.execute(
                 """
                 SELECT session_id, created_at, user_id, course, mode, summary
@@ -199,22 +200,26 @@ class SessionHistoryStore:
         )
 
     def delete_session(self, session_id: str) -> None:
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
             connection.commit()
 
     def upsert_summary(self, session_id: str, summary: str) -> None:
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 "UPDATE sessions SET summary = ? WHERE session_id = ?",
                 (summary, session_id),
             )
             connection.commit()
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(str(self._db_path))
         connection.row_factory = sqlite3.Row
-        return connection
+        try:
+            yield connection
+        finally:
+            connection.close()
 
 
 class ConversationManager:

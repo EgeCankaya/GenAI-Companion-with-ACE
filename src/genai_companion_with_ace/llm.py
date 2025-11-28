@@ -12,31 +12,34 @@ def check_ollama_connection(base_url: str = "http://localhost:11434", timeout: i
     """Check if Ollama is running and accessible."""
     try:
         response = requests.get(f"{base_url}/api/tags", timeout=timeout)
-        return response.status_code == 200
     except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, socket.error):
         return False
+    return response.status_code == 200
 
 
 def check_ollama_model(base_url: str, model_name: str, timeout: int = 2) -> tuple[bool, list[str]]:
     """Check if a specific Ollama model is installed. Returns (is_installed, available_models)."""
     try:
         response = requests.get(f"{base_url}/api/tags", timeout=timeout)
-        if response.status_code != 200:
-            return False, []
-
         data = response.json()
-        models = [model.get("name", "") for model in data.get("models", [])]
-
-        model_installed = any(
-            model_name == model
-            or model_name.startswith(model.split(":")[0])
-            or model.startswith(model_name.split(":")[0])
-            for model in models
-        )
-
-        return model_installed, models
-    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, socket.error, KeyError):
+    except (
+        requests.exceptions.ConnectionError,
+        requests.exceptions.Timeout,
+        socket.error,
+        ValueError,
+    ):
         return False, []
+    if response.status_code != 200:
+        return False, []
+
+    models = [model.get("name", "") for model in data.get("models", [])]
+    model_installed = any(
+        model_name == model
+        or model_name.startswith(model.split(":")[0])
+        or model.startswith(model_name.split(":")[0])
+        for model in models
+    )
+    return model_installed, models
 
 
 class LangChainLLMAdapter:
