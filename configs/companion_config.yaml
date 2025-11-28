@@ -1,0 +1,83 @@
+paths:
+  data_root: data
+  processed_dir: data/processed
+  vector_store: data/chroma
+
+outputs:
+  conversations: outputs/conversations
+  metrics: outputs/metrics
+  ace_playbooks: outputs/ace_playbooks
+  logs: outputs/logs
+
+llm:
+  provider: ollama
+  deep_dive_provider: null  # optional: set to openai to use hosted model for deep dives
+  providers:
+    ollama:
+      model: llama3.1:8b
+      base_url: http://localhost:11434
+      temperature: 0.2
+      max_tokens: 8000
+      num_ctx: 12288
+    openai:
+      model: gpt-4o-mini
+      temperature: 0.2
+      max_tokens: 4096
+
+embedding:
+  provider: sentence-transformers
+  providers:
+    sentence-transformers:
+      model_name: sentence-transformers/all-MiniLM-L6-v2
+      device: auto
+      normalize_embeddings: true
+    openai:
+      model_name: text-embedding-3-small
+      api_key_env: OPENAI_API_KEY
+      dimensions: 1536
+
+vector_store:
+  collection_name: ibm_genai_companion
+  persist_directory: data/chroma
+  reset_on_start: false
+  metadata_fields:
+    - course
+    - module
+    - topic
+    - difficulty
+
+retrieval:
+  dense_top_k: 5
+  keyword_top_k: 5
+  hybrid_top_k: 8
+  deduplicate: true
+  min_score_threshold: 0.0
+
+conversation_history:
+  backend: sqlite
+  path: outputs/conversations/history.db
+  max_turns: 20
+
+ace:
+  repository_path: ../Agentic-Context-Engineering
+  playbook_output_dir: outputs/ace_playbooks
+  config_path: ../Agentic-Context-Engineering/agentic_context_engineering/configs/default.yaml
+  trigger_threshold: 50
+  iterations: 1
+
+ingestion:
+  chunk_size: 800
+  chunk_overlap: 200
+  max_file_size_mb: 10
+  metadata_keys:
+    - course
+    - module
+    - topic
+    - difficulty
+
+ui:
+  cli:
+    boxed_answers: true
+    reflow_on_resize: true
+    box_style: simple
+

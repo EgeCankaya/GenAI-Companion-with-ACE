@@ -1,0 +1,172 @@
+[project]
+name = "GenAI-Companion-with-ACE"
+version = "0.0.1"
+description = "Gen AI Companion that utilizes ACE"
+authors = [{ name = "Egemen Çankaya", email = "egemencankaya14@gmail.com" }]
+readme = "README.md"
+keywords = ["python", "rag", "ace", "llm"]
+requires-python = ">=3.9,<4.0"
+classifiers = [
+    "Intended Audience :: Developers",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+dependencies = [
+    # ACE Framework (Project 1)
+    "agentic-context-engineering @ git+https://github.com/EgeCankaya/Agentic-Context-Engineering.git",
+
+    # RAG & LangChain ecosystem
+    "langchain>=0.3.0",
+    "langchain-community>=0.3.0",
+    "langchain-chroma>=0.1.0",
+    "langchain-text-splitters>=0.1.0",
+    "langchain-openai>=0.1.0",
+    "langchain-huggingface>=0.0.1",
+    "rank-bm25>=0.2.2",
+    "chromadb>=0.4.0",
+
+    # Embeddings & model clients
+    "sentence-transformers>=2.5.0",
+    "torch>=2.0.0",
+    "ollama>=0.3.0",
+
+    # Optional hosted models
+    "openai>=1.0.0",
+
+    # Document processing
+    "pypdf>=4.0.0",
+    "beautifulsoup4>=4.12.0",
+    "markdownify>=0.12.0",
+    "python-docx>=1.1.0",
+
+    # Utilities
+    "click>=8.1.0",
+    "rich>=13.7.0",
+    "pydantic>=2.5.0",
+    "pyyaml>=6.0",
+    "tenacity>=8.2.0",
+
+    # Evaluation & analytics
+    "ragas>=0.1.9",
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "matplotlib>=3.7.0",
+
+    # Persistence
+    "sqlalchemy>=2.0.0",
+]
+
+[project.scripts]
+genai-companion = "genai_companion_with_ace.cli:cli"
+
+[project.urls]
+Homepage = "https://EgeCankaya.github.io/GenAI-Companion-with-ACE/"
+Repository = "https://github.com/EgeCankaya/GenAI-Companion-with-ACE"
+Documentation = "https://EgeCankaya.github.io/GenAI-Companion-with-ACE/"
+
+[dependency-groups]
+dev = [
+    "pytest>=7.2.0",
+    "pre-commit>=2.20.0",
+    "tox-uv>=1.11.3",
+    "deptry>=0.23.0",
+    "mypy>=0.991",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.11.5",
+    "mkdocs>=1.4.2",
+    "mkdocs-material>=8.5.10",
+    "mkdocstrings[python]>=0.26.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/genai_companion_with_ace"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.mypy]
+files = ["src"]
+disallow_untyped_defs = true
+disallow_any_unimported = true
+no_implicit_optional = true
+check_untyped_defs = true
+warn_return_any = true
+warn_unused_ignores = true
+show_error_codes = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "offline: Tests that run without external services",
+    "requires_llm: Tests that require model backends or external services",
+]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 120
+fix = true
+
+[tool.ruff.lint]
+select = [
+    # flake8-2020
+    "YTT",
+    # flake8-bandit
+    "S",
+    # flake8-bugbear
+    "B",
+    # flake8-builtins
+    "A",
+    # flake8-comprehensions
+    "C4",
+    # flake8-debugger
+    "T10",
+    # flake8-simplify
+    "SIM",
+    # isort
+    "I",
+    # mccabe
+    "C90",
+    # pycodestyle
+    "E", "W",
+    # pyflakes
+    "F",
+    # pygrep-hooks
+    "PGH",
+    # pyupgrade
+    "UP",
+    # ruff
+    "RUF",
+    # tryceratops
+    "TRY",
+]
+ignore = [
+    # LineTooLong
+    "E501",
+    # DoNotAssignLambda
+    "E731",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]
+
+[tool.ruff.format]
+preview = true
+
+[tool.coverage.report]
+skip_empty = true
+
+[tool.coverage.run]
+branch = true
+source = ["src"]
+

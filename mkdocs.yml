@@ -1,0 +1,54 @@
+site_name: GenAI-Companion-with-ACE
+repo_url: https://github.com/EgeCankaya/GenAI-Companion-with-ACE
+site_url: https://EgeCankaya.github.io/GenAI-Companion-with-ACE
+site_description: Gen AI Companion that utilizes ACE
+site_author: Egemen Çankaya
+edit_uri: edit/main/docs/
+repo_name: EgeCankaya/GenAI-Companion-with-ACE
+copyright: Maintained by <a href="https://EgeCankaya.com">EgeCankaya</a>.
+
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+  - Operations: operations.md
+  - Modules: modules.md
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: ["src/genai_companion_with_ace"]
+theme:
+  name: material
+  feature:
+    tabs: true
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: white
+      accent: deep orange
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: deep orange
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/EgeCankaya/GenAI-Companion-with-ACE
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/GenAI-Companion-with-ACE
+
+markdown_extensions:
+  - toc:
+      permalink: true
+  - pymdownx.arithmatex:
+      generic: true
