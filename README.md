@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # GenAI-Companion-with-ACE
 
 [![Release](https://img.shields.io/github/v/release/EgeCankaya/GenAI-Companion-with-ACE)](https://img.shields.io/github/v/release/EgeCankaya/GenAI-Companion-with-ACE)
@@ -326,3 +327,6 @@ llm:
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+=======
+# GenAI-Companion-with-ACE
+>>>>>>> e3730d6e60502c8ed201d90fa229ce188f58a2f6
