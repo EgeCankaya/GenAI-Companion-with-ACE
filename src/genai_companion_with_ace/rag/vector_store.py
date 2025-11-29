@@ -10,6 +10,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
+import chromadb
 from chromadb.config import Settings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
@@ -132,16 +133,24 @@ class VectorStoreManager:
                 self._config.collection_name,
                 self._config.persist_directory,
             )
+            # Explicitly use SegmentAPI for local persistent stores to avoid tenant validation issues
+            # with RustBindingsAPI. SegmentAPI is designed for local embedded mode.
+            # Create the ChromaDB client directly to ensure settings are applied correctly.
             client_settings = Settings(
+                chroma_api_impl="chromadb.api.segment.SegmentAPI",
                 anonymized_telemetry=False,
                 allow_reset=True,
                 persist_directory=str(self._config.persist_directory),
             )
+            # Create the client directly to ensure SegmentAPI is used
+            chroma_client = chromadb.PersistentClient(
+                path=str(self._config.persist_directory),
+                settings=client_settings,
+            )
             self._store = Chroma(
+                client=chroma_client,
                 collection_name=self._config.collection_name,
-                persist_directory=str(self._config.persist_directory),
                 embedding_function=self._embeddings,
-                client_settings=client_settings,
             )
         return self._store
 
