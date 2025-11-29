@@ -19,6 +19,40 @@ from langchain_core.vectorstores import VectorStore as VectorStoreBase
 
 LOGGER = logging.getLogger(__name__)
 
+# Workaround for ChromaDB SegmentAPI compatibility with hnswlib
+# ChromaDB's SegmentAPI tries to access hnswlib.Index.file_handle_count which
+# doesn't exist in some versions. This monkeypatch ensures compatibility.
+try:
+    import hnswlib
+
+    if not hasattr(hnswlib.Index, "file_handle_count"):
+        # Add the missing attribute as a class variable if it doesn't exist
+        # This is a workaround for ChromaDB's SegmentAPI compatibility issue
+        # where it expects this attribute but newer versions of hnswlib don't have it
+        hnswlib.Index.file_handle_count = 0  # type: ignore[attr-defined]
+except ImportError:
+    pass  # hnswlib not installed, will fail later with a clearer error
+
+# Also patch ChromaDB's internal code that accesses this attribute
+try:
+    from chromadb.segment.impl.vector import local_persistent_hnsw
+
+    # Monkeypatch the get_file_handle_count method to handle missing attribute gracefully
+    original_get_file_handle_count = local_persistent_hnsw.PersistentLocalHnswSegment.get_file_handle_count
+
+    @staticmethod
+    def patched_get_file_handle_count() -> int:
+        """Patched version that handles missing hnswlib.Index.file_handle_count."""
+        try:
+            return original_get_file_handle_count()
+        except AttributeError:
+            # If the attribute doesn't exist, return 0 (no file handles tracked)
+            return 0
+
+    local_persistent_hnsw.PersistentLocalHnswSegment.get_file_handle_count = patched_get_file_handle_count  # type: ignore[assignment]
+except (ImportError, AttributeError):
+    pass  # ChromaDB structure may have changed, fall back to default behavior
+
 
 @dataclass(slots=True, frozen=True)
 class VectorStoreConfig:

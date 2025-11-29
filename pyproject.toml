@@ -30,7 +30,7 @@ dependencies = [
     "langchain-openai>=0.1.0",
     "langchain-huggingface>=0.0.1",
     "rank-bm25>=0.2.2",
-    "chromadb>=0.4.0",
+    "chromadb>=0.4.24,<0.5.0",  # Pin to stable version compatible with SegmentAPI
     "hnswlib>=0.8.0",  # Requires file_handle_count used by Chroma SegmentAPI
 
     # Embeddings & model clients
@@ -59,6 +59,9 @@ dependencies = [
     "pandas>=2.0.0",
     "numpy>=1.24.0",
     "matplotlib>=3.7.0",
+    # onnxruntime is a transitive dependency but only available for Python >= 3.10
+    # Exclude it for Python 3.9 to avoid installation failures
+    "onnxruntime>=1.20.1; python_version >= '3.10'",
 
     # Persistence
     "sqlalchemy>=2.0.0",
