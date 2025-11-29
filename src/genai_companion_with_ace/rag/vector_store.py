@@ -49,7 +49,7 @@ class VectorStoreManager:
     def persist_directory(self) -> Path:
         return self._config.persist_directory
 
-    def as_retriever(self, **kwargs):
+    def as_retriever(self, **kwargs):  # type: ignore[no-untyped-def]
         """Return a LangChain retriever wrapper."""
         store = self._ensure_store()
         return store.as_retriever(**kwargs)
@@ -104,7 +104,8 @@ class VectorStoreManager:
         """
         try:
             store = self._ensure_store()
-            _ = store.get()  # This will fail if corrupted
+            # Try to access the collection to verify it's healthy
+            _ = store._collection  # type: ignore[attr-defined]  # Access internal collection to verify health
         except Exception as e:
             error_msg = str(e)
             if "panic" in error_msg.lower() or "out of range" in error_msg.lower():
@@ -132,7 +133,6 @@ class VectorStoreManager:
                 self._config.persist_directory,
             )
             client_settings = Settings(
-                chroma_api_impl="chromadb.api.segment.SegmentAPI",
                 anonymized_telemetry=False,
                 allow_reset=True,
                 persist_directory=str(self._config.persist_directory),

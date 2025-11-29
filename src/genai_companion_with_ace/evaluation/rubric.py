@@ -6,15 +6,18 @@ import logging
 from dataclasses import dataclass, field
 
 try:  # pragma: no cover - optional heavy dependency
-    from datasets import Dataset
+    from datasets import Dataset  # type: ignore[import-untyped]
     from ragas import evaluate as ragas_evaluate
-    from ragas.metrics import AnswerCorrectness, AnswerRelevancy, ContextRelevancy, Faithfulness
+    from ragas.metrics import AnswerCorrectness, AnswerRelevancy, ContextRelevance, Faithfulness  # ContextRelevance not ContextRelevancy
 
     _RAGAS_AVAILABLE = True
 except Exception:  # pragma: no cover
-    Dataset = None  # type: ignore[assignment]
-    ragas_evaluate = None
-    AnswerCorrectness = AnswerRelevancy = ContextRelevancy = Faithfulness = None
+    Dataset = None  # type: ignore[assignment,misc]
+    ragas_evaluate = None  # type: ignore[assignment,misc]
+    AnswerCorrectness = None  # type: ignore[assignment,misc]
+    AnswerRelevancy = None  # type: ignore[assignment,misc]
+    ContextRelevance = None  # type: ignore[assignment,misc]
+    Faithfulness = None  # type: ignore[assignment,misc]
     _RAGAS_AVAILABLE = False
 
 LOGGER = logging.getLogger(__name__)
@@ -61,11 +64,23 @@ class EvaluationRubric:
         metrics = [
             AnswerRelevancy(),
             AnswerCorrectness(),
-            ContextRelevancy(),
+            ContextRelevance(),  # Fixed: ContextRelevance not ContextRelevancy
             Faithfulness(),
         ]
         result = ragas_evaluate(dataset, metrics=metrics)
-        scores = {metric.__class__.__name__.lower(): result[metric.__class__.__name__.lower()][0] for metric in metrics}
+        # Extract scores from result - result is an EvaluationResult with a results dict
+        scores: dict[str, float] = {}
+        for metric in metrics:
+            metric_name = metric.__class__.__name__.lower()
+            # Handle both dict-like and object-like result structures
+            if isinstance(result, dict) and metric_name in result:
+                metric_scores = result[metric_name]
+                if metric_scores and len(metric_scores) > 0:
+                    scores[metric_name] = float(metric_scores[0])
+            elif hasattr(result, "results") and metric_name in result.results:  # type: ignore[attr-defined]
+                metric_scores = result.results[metric_name]  # type: ignore[attr-defined,index]
+                if metric_scores and len(metric_scores) > 0:
+                    scores[metric_name] = float(metric_scores[0])
         return scores
 
     def _simple_overlap(self, question: str, answer: str, golden_answer: str) -> dict[str, float]:

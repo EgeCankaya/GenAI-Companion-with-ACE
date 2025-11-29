@@ -98,7 +98,9 @@ class EmbeddingFactory:
             raise RuntimeError(message) from exc
 
         LOGGER.info("Loading OpenAI embedding model '%s'", self._config.model_name)
-        options = {
+        from typing import Any
+
+        options: dict[str, Any] = {
             "model": self._config.model_name,
             "api_key": None,
             "openai_api_base": self._config.api_base,

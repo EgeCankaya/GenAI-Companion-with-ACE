@@ -267,7 +267,7 @@ class DocumentIngestionPipeline:
     @staticmethod
     def _load_docx(path: Path) -> str:
         try:
-            import docx  # type: ignore[import]
+            import docx  # type: ignore[import-untyped]
         except ImportError as exc:  # pragma: no cover
             message = "Install 'python-docx' to enable DOCX ingestion"
             raise RuntimeError(message) from exc
@@ -286,7 +286,8 @@ class DocumentIngestionPipeline:
     def _load_yaml(path: Path) -> str:
         with path.open("r", encoding="utf-8") as file:
             content = yaml.safe_load(file)
-        return yaml.safe_dump(content, sort_keys=False, allow_unicode=True)
+        result = yaml.safe_dump(content, sort_keys=False, allow_unicode=True)
+        return str(result)  # Ensure we return str, not Any
 
     @staticmethod
     def _load_notebook(path: Path) -> str:

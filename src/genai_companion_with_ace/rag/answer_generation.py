@@ -63,7 +63,7 @@ class AnswerGenerator:
     def __init__(
         self,
         *,
-        llm_client,
+        llm_client: Any,
         retrieval: RetrievalOrchestrator,
         conversation_manager: ConversationManager,
         formatter: ResponseFormatter,
@@ -437,7 +437,8 @@ class AnswerGenerator:
             temperature=temperature,
             max_tokens=max(256, max_tokens),
         )
-        return answer.rstrip() + "\n\n" + continuation.strip()
+        result = answer.rstrip() + "\n\n" + continuation.strip()
+        return str(result)  # Ensure we return str, not Any
 
     def _continue_outline_if_needed(
         self,
@@ -460,7 +461,7 @@ class AnswerGenerator:
             max_tokens=max(256, params.max_tokens // 2),
         )
 
-    def _select_llm(self, detail_requested: bool):
+    def _select_llm(self, detail_requested: bool) -> Any:
         if detail_requested and self._deep_llm_client:
             return self._deep_llm_client
         return self._llm_client
@@ -513,17 +514,17 @@ class AnswerGenerator:
         except Exception as exc:  # pragma: no cover - fallback parse
             LOGGER.debug("Failed to parse outline JSON; falling back to plain-text outline: %s", exc)
         # Fallback simple outline by splitting lines
-        outline: list[OutlineSection] = []
+        fallback_outline: list[OutlineSection] = []
         for _idx, line in enumerate(response.splitlines()):
             line = line.strip("-* \t")
             if not line:
                 continue
-            outline.append(OutlineSection(title=line, bullets=[]))
-            if len(outline) >= target_sections:
+            fallback_outline.append(OutlineSection(title=line, bullets=[]))
+            if len(fallback_outline) >= target_sections:
                 break
-        if not outline:
-            outline.append(OutlineSection(title="Overview", bullets=key_points[:3]))
-        return outline
+        if not fallback_outline:
+            fallback_outline.append(OutlineSection(title="Overview", bullets=key_points[:3]))
+        return fallback_outline
 
     @staticmethod
     def _format_outline_for_prompt(sections: list[OutlineSection]) -> str:

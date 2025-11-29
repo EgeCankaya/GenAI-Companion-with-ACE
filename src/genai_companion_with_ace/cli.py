@@ -165,7 +165,7 @@ def perform_trigger_ace(companion_config: CompanionConfig, *, iterations: int | 
         playbook_output_dir=companion_config.outputs.ace_playbooks,
         iterations=num_iterations,
         trigger_threshold=ace_cfg.get("trigger_threshold", 50),
-        config_path=Path(ace_cfg.get("config_path")) if ace_cfg.get("config_path") else None,
+        config_path=Path(str(ace_cfg.get("config_path"))) if ace_cfg.get("config_path") else None,
     )
 
     console.print(f"Running [cyan]{num_iterations}[/cyan] ACE iteration(s)...")
@@ -889,7 +889,7 @@ def evaluate_command(
         evaluation_dataset = EvaluationDataset(evaluation_dataset.examples[:limit])
     engine = EvaluationEngine(EvaluationRubric())
 
-    def answer_provider(example):
+    def answer_provider(example: Any) -> str:
         session_id = f"eval-{example.id}"
         processed = runtime.query_processor.process(
             session_id=session_id,

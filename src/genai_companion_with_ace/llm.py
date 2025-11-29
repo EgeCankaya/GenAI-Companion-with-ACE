@@ -11,9 +11,9 @@ def check_ollama_connection(base_url: str = "http://localhost:11434", timeout: i
     """Check if Ollama is running and accessible."""
     try:
         response = requests.get(f"{base_url}/api/tags", timeout=timeout)
+        return response.status_code == 200
     except (OSError, requests.exceptions.ConnectionError, requests.exceptions.Timeout):
         return False
-    return response.status_code == 200
 
 
 def check_ollama_model(base_url: str, model_name: str, timeout: int = 2) -> tuple[bool, list[str]]:
@@ -44,7 +44,7 @@ class LangChainLLMAdapter:
         self._current_max_tokens = settings.get("max_tokens", 4096)
         self.llm = self._initialize_llm()
 
-    def _initialize_llm(self, max_tokens: int | None = None):  # pragma: no cover - depends on runtime environment
+    def _initialize_llm(self, max_tokens: int | None = None) -> Any:  # pragma: no cover - depends on runtime environment
         max_tokens = max_tokens or self._current_max_tokens
         if self.provider == "ollama":
             from langchain_community.llms import Ollama
@@ -62,14 +62,14 @@ class LangChainLLMAdapter:
             return ChatOpenAI(
                 model=self.settings.get("model", "gpt-4o-mini"),
                 temperature=self.settings.get("temperature", 0.2),
-                max_tokens=max_tokens,
+                max_tokens=max_tokens,  # type: ignore[call-arg]  # ChatOpenAI accepts max_tokens but type stubs may be outdated
                 base_url=self.settings.get("base_url"),
                 timeout=self.settings.get("timeout"),
             )
         message = f"Unsupported LLM provider: {self.provider}"
         raise ValueError(message)
 
-    def generate(self, prompt: str, **kwargs) -> str:
+    def generate(self, prompt: str, **kwargs: Any) -> str:
         # Support dynamic max_tokens per call
         max_tokens = kwargs.get("max_tokens")
         if max_tokens and max_tokens != self._current_max_tokens:

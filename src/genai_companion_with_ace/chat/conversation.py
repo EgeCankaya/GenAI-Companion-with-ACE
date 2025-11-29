@@ -280,8 +280,8 @@ class ConversationManager:
 
     def _append_message(self, role: str, content: str, metadata: dict[str, Any] | None) -> Message:
         if not self._active_session:
-            message = "No active session; call start_session() first"
-            raise RuntimeError(message)
+            error_msg = "No active session; call start_session() first"
+            raise RuntimeError(error_msg)
         message = Message(role=role, content=content, created_at=utcnow_isoformat(), metadata=metadata or {})
         self._store.append_message(self._active_session, message)
         self._store.truncate_session(self._active_session, self._max_context_turns * 2)

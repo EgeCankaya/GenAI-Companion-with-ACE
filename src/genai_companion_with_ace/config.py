@@ -165,7 +165,8 @@ class CompanionConfig:
 
     def conversation_max_turns(self) -> int:
         cfg = self.raw.get("conversation_history", {})
-        return cfg.get("max_turns", 20)
+        result = cfg.get("max_turns", 20)
+        return int(result)  # Ensure we return int, not Any
 
     def ace_config(self) -> dict[str, Any]:
         cfg = self.raw.get("ace", {})

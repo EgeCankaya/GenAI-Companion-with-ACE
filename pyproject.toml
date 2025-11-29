@@ -31,7 +31,7 @@ dependencies = [
     "langchain-huggingface>=0.0.1",
     "rank-bm25>=0.2.2",
     "chromadb>=0.4.0",
-    "hnswlib>=0.7.0",
+    "hnswlib>=0.7.0,<0.8.0",  # Pin to avoid file_handle_count AttributeError in newer versions
 
     # Embeddings & model clients
     "sentence-transformers>=2.5.0",
@@ -84,6 +84,8 @@ dev = [
     "mkdocs>=1.4.2",
     "mkdocs-material>=8.5.10",
     "mkdocstrings[python]>=0.26.1",
+    "types-PyYAML>=6.0.12",
+    "types-requests>=2.31.0",
 ]
 
 [build-system]

@@ -39,8 +39,8 @@ class ACERunnerAdapter:
 
     def __init__(self, config: ACETriggerConfig) -> None:
         try:
-            from agentic_context_engineering.runners.ace_runner import ACERunner  # type: ignore[import-not-found]
-            from agentic_context_engineering.utils import llm_client  # type: ignore[import-not-found]
+            from agentic_context_engineering.runners.ace_runner import ACERunner  # type: ignore[import-untyped,import-not-found]
+            from agentic_context_engineering.utils import llm_client  # type: ignore[import-untyped,import-not-found]
         except ImportError as e:
             error_msg = (
                 f"ACE framework not available. Import error: {e}\n"
@@ -50,11 +50,11 @@ class ACERunnerAdapter:
 
         if not hasattr(llm_client.LLMClient, "_genai_cpu_patch"):
 
-            def _skip_gpu_check(self):
+            def _skip_gpu_check(self: Any) -> None:
                 return None
 
-            llm_client.LLMClient._verify_gpu = _skip_gpu_check  # type: ignore[attr-defined]
-            llm_client.LLMClient._genai_cpu_patch = True  # type: ignore[attr-defined]
+            llm_client.LLMClient._verify_gpu = _skip_gpu_check  # type: ignore[method-assign,attr-defined]
+            llm_client.LLMClient._genai_cpu_patch = True  # type: ignore[assignment,attr-defined]
 
         config_path = str(config.config_path) if config.config_path else None
         self._repo_path = Path(config.repo_path).resolve()
@@ -97,7 +97,7 @@ class ACERunnerAdapter:
         return self._ensure_project_copy(ace_playbook_path, playbook_output_dir)
 
     def _materialize_playbook(self, raw_playbook: Any) -> Path:
-        from agentic_context_engineering.playbook_schema import Playbook  # type: ignore[import-not-found]
+        from agentic_context_engineering.playbook_schema import Playbook  # type: ignore[import-untyped,import-not-found]
 
         if isinstance(raw_playbook, str):
             ace_playbook_path = Path(raw_playbook)
@@ -157,7 +157,7 @@ def run_ace_cycles(
 
 
 @contextlib.contextmanager
-def _in_directory(path: Path):
+def _in_directory(path: Path) -> Any:  # Returns a context manager
     old_cwd = Path.cwd()
     os.chdir(path)
     try:

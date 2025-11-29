@@ -78,7 +78,7 @@ def build_runtime_components(config: CompanionConfig) -> RuntimeComponents:
         playbook_output_dir=config.outputs.ace_playbooks,
         iterations=ace_cfg.get("iterations", 1),
         trigger_threshold=ace_cfg.get("trigger_threshold", 50),
-        config_path=Path(ace_cfg.get("config_path")) if ace_cfg.get("config_path") else None,
+        config_path=Path(str(ace_cfg.get("config_path"))) if ace_cfg.get("config_path") else None,
     )
 
     answer_generator = AnswerGenerator(
