@@ -77,4 +77,3 @@ def test_list_ingested_documents_returns_manifest(tmp_path: Path) -> None:
     summary = summaries[0]
     assert summary.metadata["course"] == "1"
     assert summary.chunk_count > 0
-

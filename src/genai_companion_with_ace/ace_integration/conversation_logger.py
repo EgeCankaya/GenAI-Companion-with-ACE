@@ -75,15 +75,13 @@ class ConversationLogger:
         """Export a list of conversation turns formatted for ACE training."""
         exports: list[dict[str, str]] = []
         for record in self._iter_records():
-            exports.append(
-                {
-                    "session_id": record["session_id"],
-                    "input": record["question"],
-                    "output": record["answer"],
-                    "sources": record.get("retrieved_sources", []),
-                    "metadata": record.get("metadata", {}),
-                }
-            )
+            exports.append({
+                "session_id": record["session_id"],
+                "input": record["question"],
+                "output": record["answer"],
+                "sources": record.get("retrieved_sources", []),
+                "metadata": record.get("metadata", {}),
+            })
             if limit is not None and len(exports) >= limit:
                 break
         return exports
@@ -154,12 +152,9 @@ class ConversationLogger:
         sources: list[dict[str, str]] = []
         for chunk in retrieval_result.combined:
             metadata = chunk.document.metadata
-            sources.append(
-                {
-                    "source": metadata.get("source") or metadata.get("document_id", "unknown"),
-                    "course": metadata.get("course", ""),
-                    "module": metadata.get("module", ""),
-                }
-            )
+            sources.append({
+                "source": metadata.get("source") or metadata.get("document_id", "unknown"),
+                "course": metadata.get("course", ""),
+                "module": metadata.get("module", ""),
+            })
         return sources
-

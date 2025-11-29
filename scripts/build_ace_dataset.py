@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import sys
 import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
-
-import hashlib
-import sys
 
 DEFAULT_QUESTIONS = Path("data/ace/questions_genai.json")
 DEFAULT_OUTPUT_DIR = Path("outputs/ace_datasets")
@@ -19,6 +18,17 @@ DEFAULT_OUTPUT_DIR = Path("outputs/ace_datasets")
 
 class DatasetBuildError(RuntimeError):
     """Raised when curated question data is missing or invalid."""
+
+
+class QuestionsFileNotFound(DatasetBuildError):
+    def __init__(self, path: Path) -> None:
+        super().__init__(f"Questions file not found: {path}")
+        self.path = path
+
+
+class EmptyQuestionsFile(DatasetBuildError):
+    def __init__(self) -> None:
+        super().__init__("Questions file must be a non-empty JSON array.")
 
 
 def parse_args() -> argparse.Namespace:
@@ -52,10 +62,10 @@ def parse_args() -> argparse.Namespace:
 
 def load_questions(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
-        raise DatasetBuildError(f"Questions file not found: {path}")
+        raise QuestionsFileNotFound(path)
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, list) or not data:
-        raise DatasetBuildError("Questions file must be a non-empty JSON array.")
+        raise EmptyQuestionsFile()
     return data
 
 
@@ -83,25 +93,23 @@ def build_dataset(questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for entry in questions:
         session_id = f"ace-gen-{uuid4().hex}"
         answer = synthesize_answer(entry)
-        dataset.append(
-            {
-                "session_id": session_id,
-                "input": entry["question"],
-                "output": answer,
-                "reference_output": answer,
-                "sources": [
-                    {
-                        "source": entry.get("course", "IBM GenAI Course"),
-                        "module": entry.get("module", ""),
-                    }
-                ],
-                "metadata": {
-                    "course": entry.get("course", ""),
+        dataset.append({
+            "session_id": session_id,
+            "input": entry["question"],
+            "output": answer,
+            "reference_output": answer,
+            "sources": [
+                {
+                    "source": entry.get("course", "IBM GenAI Course"),
                     "module": entry.get("module", ""),
-                    "question_id": entry.get("id", ""),
-                },
-            }
-        )
+                }
+            ],
+            "metadata": {
+                "course": entry.get("course", ""),
+                "module": entry.get("module", ""),
+                "question_id": entry.get("id", ""),
+            },
+        })
     return dataset
 
 
@@ -143,4 +151,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

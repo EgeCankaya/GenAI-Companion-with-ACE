@@ -12,4 +12,3 @@ __all__ = [
     "SessionHistoryStore",
     "get_mode_settings",
 ]
-

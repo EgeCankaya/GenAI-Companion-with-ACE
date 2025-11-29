@@ -130,4 +130,3 @@ def ensure_default_dataset(path: Path, samples_per_course: int = 6) -> Evaluatio
     dataset = EvaluationDataset(generate_synthetic_dataset(samples_per_course=samples_per_course))
     dataset.save(path)
     return dataset
-

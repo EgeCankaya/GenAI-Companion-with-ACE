@@ -40,6 +40,7 @@ DETAIL_KEYWORDS: tuple[str, ...] = (
     "full explanation",
 )
 
+
 @dataclass(slots=True)
 class AttachmentInput:
     """User-provided attachment destined for retrieval."""
@@ -152,4 +153,3 @@ class QueryProcessor:
                 )
             )
         return converted
-

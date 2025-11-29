@@ -17,7 +17,7 @@ def test_response_formatter_renders_citations_and_followups() -> None:
     assert "Sources" not in rendered
     assert "Course 9 - Module 2" not in rendered
     assert "Suggested follow-ups" in rendered
-    
+
     # But can be explicitly included
     rendered_with_citations = formatted.render(include_citations=True)
     assert "Sources" in rendered_with_citations
@@ -33,4 +33,3 @@ def test_response_formatter_fallback_contains_reason() -> None:
     )
     assert "outside of the IBM curriculum" in fallback.answer
     assert fallback.disclaimer is not None
-

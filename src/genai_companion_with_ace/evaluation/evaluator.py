@@ -70,4 +70,3 @@ class EvaluationEngine:
         else:
             aggregated["weighted_score"] = 0.0
         return aggregated
-

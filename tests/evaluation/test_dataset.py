@@ -22,4 +22,3 @@ def test_ensure_default_dataset_creates_file(tmp_path: Path) -> None:
     assert path.exists()
     reloaded = EvaluationDataset.load(path)
     assert len(reloaded.examples) == len(dataset.examples)
-

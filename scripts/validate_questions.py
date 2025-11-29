@@ -8,47 +8,76 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
 REQUIRED_FIELDS = ("id", "question", "course", "module")
 
 
 class QuestionValidationError(RuntimeError):
     """Raised when the curated question set fails validation."""
 
+    @classmethod
+    def invalid_entry(cls, index: int) -> QuestionValidationError:
+        return cls(f"Entry #{index} is not an object")
+
+    @classmethod
+    def missing_field(cls, index: int, field: str) -> QuestionValidationError:
+        return cls(f"Entry #{index} missing required field '{field}'")
+
+    @classmethod
+    def empty_field(cls, index: int, field: str) -> QuestionValidationError:
+        return cls(f"Field '{field}' in entry #{index} must be a non-empty string")
+
+    @classmethod
+    def duplicate_id(cls, entry_id: str, index: int) -> QuestionValidationError:
+        return cls(f"Duplicate id '{entry_id}' found (entry #{index})")
+
+    @classmethod
+    def invalid_key_points(cls, index: int) -> QuestionValidationError:
+        return cls(f"'key_points' in entry #{index} must be a list")
+
+    @classmethod
+    def invalid_key_point_value(cls, index: int, value: Any) -> QuestionValidationError:
+        return cls(f"Each key point in entry #{index} must be a non-empty string (found: {value!r})")
+
+    @classmethod
+    def file_not_found(cls, path: Path) -> QuestionValidationError:
+        return cls(f"Questions file not found: {path}")
+
+    @classmethod
+    def invalid_file(cls) -> QuestionValidationError:
+        return cls("Questions file must be a non-empty JSON array")
+
 
 def _validate_entry(entry: dict[str, Any], seen_ids: set[str], index: int) -> None:
     if not isinstance(entry, dict):
-        raise TypeError(f"Entry #{index} is not an object")
+        raise QuestionValidationError.invalid_entry(index)
 
     for field in REQUIRED_FIELDS:
         if field not in entry:
-            raise QuestionValidationError(f"Entry #{index} missing required field '{field}'")
+            raise QuestionValidationError.missing_field(index, field)
         value = entry[field]
         if not isinstance(value, str) or not value.strip():
-            raise QuestionValidationError(f"Field '{field}' in entry #{index} must be a non-empty string")
+            raise QuestionValidationError.empty_field(index, field)
 
     entry_id = entry["id"]
     if entry_id in seen_ids:
-        raise QuestionValidationError(f"Duplicate id '{entry_id}' found (entry #{index})")
+        raise QuestionValidationError.duplicate_id(entry_id, index)
     seen_ids.add(entry_id)
 
     key_points = entry.get("key_points", []) or []
     if not isinstance(key_points, list):
-        raise TypeError(f"'key_points' in entry #{index} must be a list")
+        raise QuestionValidationError.invalid_key_points(index)
     for point in key_points:
         if not isinstance(point, str) or not point.strip():
-            raise QuestionValidationError(
-                f"Each key point in entry #{index} must be a non-empty string (found: {point!r})"
-            )
+            raise QuestionValidationError.invalid_key_point_value(index, point)
 
 
 def validate_file(path: Path) -> int:
     if not path.exists():
-        raise QuestionValidationError(f"Questions file not found: {path}")
+        raise QuestionValidationError.file_not_found(path)
 
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, list) or not raw:
-        raise QuestionValidationError("Questions file must be a non-empty JSON array")
+        raise QuestionValidationError.invalid_file()
 
     seen_ids: set[str] = set()
     for index, entry in enumerate(raw, start=1):
@@ -78,4 +107,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

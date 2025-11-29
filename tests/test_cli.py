@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from click.testing import CliRunner
-from rich.console import Console
 from unittest.mock import MagicMock
 
+from click.testing import CliRunner
+from rich.console import Console
+
 from genai_companion_with_ace import cli as cli_module
-from genai_companion_with_ace.cli import cli, handle_cli_command
 from genai_companion_with_ace.chat import ConversationMode
+from genai_companion_with_ace.cli import cli, handle_cli_command
 
 
 def test_cli_help_displays_commands() -> None:
@@ -69,4 +70,3 @@ def test_long_command_sets_target_words(monkeypatch) -> None:
         runtime=None,
     )
     assert mode_ref["target_words"] == 900
-

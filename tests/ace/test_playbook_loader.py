@@ -68,4 +68,3 @@ def test_loader_from_config(tmp_path: Path) -> None:
 
     assert context.version == "4.0.0"
     assert "Local instructions" in context.system_instructions
-

@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import importlib.util
-import socket
-import uuid
 import shutil
-from pathlib import Path
+import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import click
@@ -19,26 +18,30 @@ from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.text import Text
 
-from genai_companion_with_ace.ace_integration import ACETriggerConfig, ConversationLogger, PlaybookLoader, run_ace_cycles
-from genai_companion_with_ace.app.bootstrap import RuntimeComponents, load_runtime_from_path
-from genai_companion_with_ace.chat import MODE_REGISTRY, ConversationMode
-from genai_companion_with_ace.chat.query_processor import AttachmentInput, QueryProcessor
-from genai_companion_with_ace.config import CompanionConfig
-from genai_companion_with_ace.llm import check_ollama_connection, check_ollama_model
-from genai_companion_with_ace.rag import (
-    AnswerGenerator,
-    DocumentIngestionPipeline,
-    EmbeddingFactory,
-    GenerationError,
-    VectorStoreConfig,
-    VectorStoreManager,
+from genai_companion_with_ace.ace_integration import (
+    ACETriggerConfig,
+    ConversationLogger,
+    PlaybookLoader,
+    run_ace_cycles,
 )
+from genai_companion_with_ace.app.bootstrap import RuntimeComponents, load_runtime_from_path
+from genai_companion_with_ace.chat import MODE_REGISTRY, ConversationManager, ConversationMode
+from genai_companion_with_ace.chat.query_processor import AttachmentInput
+from genai_companion_with_ace.config import CompanionConfig
 from genai_companion_with_ace.evaluation import (
     EvaluationDataset,
     EvaluationEngine,
     EvaluationRubric,
     ensure_default_dataset,
     save_metrics_report,
+)
+from genai_companion_with_ace.llm import check_ollama_connection, check_ollama_model
+from genai_companion_with_ace.rag import (
+    DocumentIngestionPipeline,
+    EmbeddingFactory,
+    GenerationError,
+    VectorStoreConfig,
+    VectorStoreManager,
 )
 
 console = Console()
@@ -58,7 +61,7 @@ def perform_vector_store_reset(companion_config: CompanionConfig, *, force: bool
     persist_dir = vector_cfg.persist_directory
     collection_name = vector_cfg.collection_name
 
-    console.print(f"[bold]Vector Store Reset[/bold]")
+    console.print("[bold]Vector Store Reset[/bold]")
     console.print(f"Collection: [cyan]{collection_name}[/cyan]")
     console.print(f"Directory: [cyan]{persist_dir}[/cyan]")
     console.print()
@@ -75,9 +78,7 @@ def perform_vector_store_reset(companion_config: CompanionConfig, *, force: bool
     _perform_store_reset(vector_store, backup_dir)
 
 
-def _build_vector_store_manager(
-    companion_config: CompanionConfig, vector_cfg: VectorStoreConfig
-) -> VectorStoreManager:
+def _build_vector_store_manager(companion_config: CompanionConfig, vector_cfg: VectorStoreConfig) -> VectorStoreManager:
     embeddings = EmbeddingFactory(companion_config.embedding_settings()).build()
     return VectorStoreManager(embeddings, vector_cfg)
 
@@ -98,7 +99,7 @@ def _maybe_backup_existing_store(persist_dir: Path, force: bool) -> tuple[bool, 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_dir = persist_dir.parent / f"{persist_dir.name}.backup.{timestamp}"
     if not force:
-        console.print(f"[yellow]This will backup the existing store to:[/yellow]")
+        console.print("[yellow]This will backup the existing store to:[/yellow]")
         console.print(f"  [cyan]{backup_dir}[/cyan]")
         console.print()
         console.print("[yellow]After reset, you will need to re-ingest your documents.[/yellow]")
@@ -110,13 +111,14 @@ def _maybe_backup_existing_store(persist_dir: Path, force: bool) -> tuple[bool, 
         console.print("[dim]Creating backup...[/dim]")
         shutil.copytree(persist_dir, backup_dir, dirs_exist_ok=True)
         console.print(f"[green]Backup created:[/green] {backup_dir}")
-        return True, backup_dir
     except Exception as exc:  # pragma: no cover - filesystem errors vary
         console.print(f"[red]Warning: Failed to create backup:[/red] {exc}")
         if force or click.confirm("Continue without backup?"):
             return True, None
         console.print("[yellow]Reset cancelled.[/yellow]")
         return False, None
+    else:
+        return True, backup_dir
 
 
 def _perform_store_reset(vector_store: VectorStoreManager, backup_dir: Path | None) -> None:
@@ -149,7 +151,7 @@ def perform_trigger_ace(companion_config: CompanionConfig, *, iterations: int | 
         console.print(f"Conversation logs directory: [cyan]{conversation_logs_dir}[/cyan]")
         return
 
-    console.print(f"[bold]ACE Improvement Cycles[/bold]")
+    console.print("[bold]ACE Improvement Cycles[/bold]")
     console.print(f"Conversation turns available: [cyan]{turn_count}[/cyan]")
     console.print()
 
@@ -218,7 +220,11 @@ def perform_trigger_ace(companion_config: CompanionConfig, *, iterations: int | 
         console.print("[bold]Next steps:[/bold]")
         console.print("1. The new playbook will be used automatically in future conversations")
         console.print("2. Run the evaluation script to see performance improvements")
-        console.print(f"3. View playbook: [cyan]cat {playbooks[-1]}[/cyan]" if playbooks else "3. View playbook in outputs/ace_playbooks")
+        console.print(
+            f"3. View playbook: [cyan]cat {playbooks[-1]}[/cyan]"
+            if playbooks
+            else "3. View playbook in outputs/ace_playbooks"
+        )
 
     except ValueError as e:
         console.print(f"[red]Error:[/red] {e}")
@@ -317,7 +323,7 @@ def _render_boxed_fallback(content: str, box_style: str) -> None:
     available_width = getattr(console, "width", None) or (size.width if size else None) or 80
     available_width = max(20, available_width)
     title = " Companion "
-    max_line = max(len(line) for line in lines + [title.strip()])
+    max_line = max(len(line) for line in [*lines, title.strip()])
     inner_width = min(available_width - 2, max_line + 4)
     inner_width = max(inner_width, len(title), 6)
     content_width = max(1, inner_width - 2)
@@ -350,133 +356,374 @@ def _render_boxed_fallback(content: str, box_style: str) -> None:
     console.print(Text("\n".join(render_lines)))
 
 
-def handle_cli_command(
+def handle_cli_command(  # noqa: C901
     command: str,
     *,
     ingestion: DocumentIngestionPipeline,
     pending_attachments: list[AttachmentInput],
     mode_ref: dict[str, Any],
     runtime: RuntimeComponents | None = None,
+    conversation_manager: ConversationManager | None = None,
+    session_id: str | None = None,
 ) -> bool:
     lowered = command.strip().lower()
     if lowered == ":help":
-        console.print(
-            "Commands:\n"
-            "  :attach <path>  - Attach a document for the next question\n"
-            "  :mode <name>    - Switch mode (study, quiz, quick)\n"
-            "  :detail on/off  - Toggle detailed answers for the session\n"
-            "  :long <words>   - Set target word count for deep-dive answers\n"
-            "  :box on/off     - Toggle boxed rendering for answers\n"
-            "  :reflow on/off  - Toggle automatic re-render on terminal resize\n"
-            "  :history        - Show recent conversation turns (current session)\n"
-            "  :sessions       - List all conversation sessions\n"
-            "  :view <id>      - View full history of a specific session\n"
-            "  :playbook       - Show current playbook location and version\n"
-            "  :ace-status     - Check ACE integration status and agents\n"
-            "  :debug-retrieval- Inspect the last retrieval context\n"
-            "  :exit           - End the session"
-        )
+        _print_help_menu()
         return True
     if lowered == ":playbook":
-        playbook_loader = runtime.playbook_loader if runtime else None
-        if playbook_loader:
-            playbook = playbook_loader.load_latest()
-            available = playbook_loader.list_available()
-            console.print(f"[bold]Current Playbook:[/bold]")
-            console.print(f"  Version: [cyan]{playbook.version}[/cyan]")
-            console.print(f"  Directory: [cyan]{playbook_loader._playbook_dir}[/cyan]")
-            if available:
-                latest = available[-1]
-                console.print(f"  Latest file: [cyan]{latest}[/cyan]")
-                console.print(f"  File size: [dim]{latest.stat().st_size} bytes[/dim]")
-                console.print(f"  Modified: [dim]{latest.stat().st_mtime}[/dim]")
-            else:
-                console.print(f"  [yellow]No playbook files found. Using default.[/yellow]")
-                if playbook_loader._default_path and playbook_loader._default_path.exists():
-                    console.print(f"  Default playbook: [cyan]{playbook_loader._default_path}[/cyan]")
-            
-            console.print(f"\n[bold]System Instructions:[/bold]")
-            console.print(f"  {playbook.system_instructions}")
-            
-            if playbook.heuristics:
-                console.print(f"\n[bold]Heuristics ({len(playbook.heuristics)}):[/bold]")
-                for idx, h in enumerate(playbook.heuristics, 1):
-                    console.print(f"  {idx}. {h}")
-            
-            if playbook.examples:
-                console.print(f"\n[bold]Examples ({len(playbook.examples)}):[/bold]")
-                for idx, ex in enumerate(playbook.examples[:3], 1):  # Show first 3
-                    if "user" in ex:
-                        console.print(f"  {idx}. User: {ex['user'][:60]}...")
-                    if "assistant" in ex:
-                        console.print(f"     Assistant: {ex['assistant'][:60]}...")
-            
-            console.print(f"\n[bold]How to view/edit:[/bold]")
-            if available:
-                console.print(f"  View file: [cyan]cat {available[-1]}[/cyan]")
-                console.print(f"  Or open in editor: [cyan]code {available[-1]}[/cyan]")
-            console.print(f"  Directory: [cyan]dir {playbook_loader._playbook_dir}[/cyan]")
-        else:
-            console.print("[red]Playbook loader not available[/red]")
+        _render_playbook(runtime)
         return True
     if lowered == ":ace-status":
-        # This will be handled in the chat function with access to runtime state
-        return False  # Let it fall through to be handled in chat function
+        _render_ace_status(runtime)
+        return True
     if lowered.startswith(":attach"):
-        parts = command.split(maxsplit=1)
-        if len(parts) == 2:
-            attachment = handle_attachment(ingestion, parts[1])
-            if attachment:
-                pending_attachments.append(attachment)
-                console.print(f"[cyan]Attached:[/] {attachment.name}")
-        else:
-            console.print("Usage: :attach <file_path>")
+        _attach_document(command, ingestion, pending_attachments)
         return True
     if lowered.startswith(":mode"):
-        parts = command.split(maxsplit=1)
-        if len(parts) == 2 and parts[1] in MODE_REGISTRY:
-            mode_ref["current"] = ConversationMode(parts[1])
-            console.print(f"[cyan]Switched to {mode_ref['current'].value} mode.[/]")
-        else:
-            console.print("Available modes: study, quiz, quick")
+        _set_conversation_mode(command, mode_ref)
         return True
     if lowered.startswith(":detail"):
-        parts = command.split(maxsplit=1)
-        setting = parts[1].strip().lower() if len(parts) == 2 else ""
-        if setting in {"on", "off", "deep"}:
-            mode_ref["detail"] = setting in {"on", "deep"}
-            state = "on" if mode_ref["detail"] else "off"
-            console.print(f"[cyan]Detail mode: {state}[/]")
-        else:
-            console.print("Usage: :detail on|off")
+        _toggle_detail_mode(command, mode_ref)
         return True
     if lowered.startswith(":long"):
-        parts = command.split(maxsplit=1)
-        if len(parts) == 2 and parts[1].strip().isdigit():
-            mode_ref["target_words"] = int(parts[1].strip())
-            console.print(f"[cyan]Target length set to {mode_ref['target_words']} words.[/]")
-        else:
-            console.print("Usage: :long <word_count>")
+        _set_target_words(command, mode_ref)
         return True
     if lowered.startswith(":box"):
-        parts = command.split(maxsplit=1)
-        setting = parts[1].strip().lower() if len(parts) == 2 else ""
-        if setting in {"on", "off"}:
-            mode_ref["boxed"] = setting == "on"
-            console.print(f"[cyan]Boxed answers: {'on' if mode_ref['boxed'] else 'off'}[/]")
-        else:
-            console.print("Usage: :box on|off")
+        _toggle_boolean_setting(command, mode_ref, "boxed", "Boxed answers")
         return True
     if lowered.startswith(":reflow"):
-        parts = command.split(maxsplit=1)
-        setting = parts[1].strip().lower() if len(parts) == 2 else ""
-        if setting in {"on", "off"}:
-            mode_ref["auto_reflow"] = setting == "on"
-            console.print(f"[cyan]Auto reflow: {'on' if mode_ref['auto_reflow'] else 'off'}[/]")
-        else:
-            console.print("Usage: :reflow on|off")
+        _toggle_boolean_setting(command, mode_ref, "auto_reflow", "Auto reflow")
+        return True
+    if lowered == ":history" and conversation_manager and session_id:
+        _render_history(conversation_manager, session_id)
+        return True
+    if lowered == ":sessions" and conversation_manager:
+        _render_sessions(conversation_manager)
+        return True
+    if lowered.startswith(":view") and conversation_manager:
+        _render_session_view(command, conversation_manager)
+        return True
+    if lowered == ":debug-retrieval":
+        _render_retrieval_debug(runtime)
         return True
     return False
+
+
+def _print_help_menu() -> None:
+    console.print(
+        "Commands:\n"
+        "  :attach <path>  - Attach a document for the next question\n"
+        "  :mode <name>    - Switch mode (study, quiz, quick)\n"
+        "  :detail on/off  - Toggle detailed answers for the session\n"
+        "  :long <words>   - Set target word count for deep-dive answers\n"
+        "  :box on/off     - Toggle boxed rendering for answers\n"
+        "  :reflow on/off  - Toggle automatic re-render on terminal resize\n"
+        "  :history        - Show recent conversation turns (current session)\n"
+        "  :sessions       - List all conversation sessions\n"
+        "  :view <id>      - View full history of a specific session\n"
+        "  :playbook       - Show current playbook location and version\n"
+        "  :ace-status     - Check ACE integration status and agents\n"
+        "  :debug-retrieval- Inspect the last retrieval context\n"
+        "  :exit           - End the session"
+    )
+
+
+def _render_playbook(runtime: RuntimeComponents | None) -> None:  # noqa: C901
+    playbook_loader = runtime.playbook_loader if runtime else None
+    if not playbook_loader:
+        console.print("[red]Playbook loader not available[/red]")
+        return
+    playbook = playbook_loader.load_latest()
+    available = playbook_loader.list_available()
+    console.print("[bold]Current Playbook:[/bold]")
+    console.print(f"  Version: [cyan]{playbook.version}[/cyan]")
+    console.print(f"  Directory: [cyan]{playbook_loader._playbook_dir}[/cyan]")
+    if available:
+        latest = available[-1]
+        console.print(f"  Latest file: [cyan]{latest}[/cyan]")
+        console.print(f"  File size: [dim]{latest.stat().st_size} bytes[/dim]")
+        console.print(f"  Modified: [dim]{latest.stat().st_mtime}[/dim]")
+    else:
+        console.print("[yellow]No playbook files found. Using default.[/yellow]")
+        if playbook_loader._default_path and playbook_loader._default_path.exists():
+            console.print(f"  Default playbook: [cyan]{playbook_loader._default_path}[/cyan]")
+
+    console.print("\n[bold]System Instructions:[/bold]")
+    console.print(f"  {playbook.system_instructions}")
+    if playbook.heuristics:
+        console.print(f"\n[bold]Heuristics ({len(playbook.heuristics)}):[/bold]")
+        for idx, heuristic in enumerate(playbook.heuristics, 1):
+            console.print(f"  {idx}. {heuristic}")
+    if playbook.examples:
+        console.print(f"\n[bold]Examples ({len(playbook.examples)}):[/bold]")
+        for idx, example in enumerate(playbook.examples[:3], 1):
+            if "user" in example:
+                console.print(f"  {idx}. User: {example['user'][:60]}...")
+            if "assistant" in example:
+                console.print(f"     Assistant: {example['assistant'][:60]}...")
+
+    console.print("\n[bold]How to view/edit:[/bold]")
+    if available:
+        console.print(f"  View file: [cyan]cat {available[-1]}[/cyan]")
+        console.print(f"  Or open in editor: [cyan]code {available[-1]}[/cyan]")
+    console.print(f"  Directory: [cyan]dir {playbook_loader._playbook_dir}[/cyan]")
+
+
+def _attach_document(
+    command: str,
+    ingestion: DocumentIngestionPipeline,
+    pending_attachments: list[AttachmentInput],
+) -> None:
+    parts = command.split(maxsplit=1)
+    if len(parts) != 2:
+        console.print("Usage: :attach <file_path>")
+        return
+    attachment = handle_attachment(ingestion, parts[1])
+    if attachment:
+        pending_attachments.append(attachment)
+        console.print(f"[cyan]Attached:[/] {attachment.name}")
+
+
+def _set_conversation_mode(command: str, mode_ref: dict[str, Any]) -> None:
+    parts = command.split(maxsplit=1)
+    if len(parts) == 2 and parts[1] in MODE_REGISTRY:
+        mode_ref["current"] = ConversationMode(parts[1])
+        console.print(f"[cyan]Switched to {mode_ref['current'].value} mode.[/]")
+    else:
+        console.print("Available modes: study, quiz, quick")
+
+
+def _toggle_detail_mode(command: str, mode_ref: dict[str, Any]) -> None:
+    parts = command.split(maxsplit=1)
+    setting = parts[1].strip().lower() if len(parts) == 2 else ""
+    if setting in {"on", "off", "deep"}:
+        mode_ref["detail"] = setting in {"on", "deep"}
+        state = "on" if mode_ref["detail"] else "off"
+        console.print(f"[cyan]Detail mode: {state}[/]")
+    else:
+        console.print("Usage: :detail on|off")
+
+
+def _set_target_words(command: str, mode_ref: dict[str, Any]) -> None:
+    parts = command.split(maxsplit=1)
+    value = parts[1].strip() if len(parts) == 2 else ""
+    if value.isdigit():
+        mode_ref["target_words"] = int(value)
+        console.print(f"[cyan]Target length set to {mode_ref['target_words']} words.[/]")
+    else:
+        console.print("Usage: :long <word_count>")
+
+
+def _toggle_boolean_setting(command: str, mode_ref: dict[str, Any], key: str, label: str) -> None:
+    parts = command.split(maxsplit=1)
+    setting = parts[1].strip().lower() if len(parts) == 2 else ""
+    if setting in {"on", "off"}:
+        mode_ref[key] = setting == "on"
+        console.print(f"[cyan]{label}: {'on' if mode_ref[key] else 'off'}[/]")
+    else:
+        console.print(f"Usage: :{key.replace('_', '')} on|off")
+
+
+def _render_history(conversation_manager: ConversationManager, session_id: str) -> None:
+    history = conversation_manager.get_recent_context(session_id)
+    if not history:
+        console.print("[yellow]No conversation history found for current session.[/yellow]")
+        console.print("[dim]Tip: use :sessions to see other session IDs.[/dim]")
+        console.print()
+        return
+    console.print(f"[bold]Conversation History (Session: {session_id})[/bold]\n")
+    for message in history:
+        speaker = "You" if message.role == "user" else "Companion"
+        role_color = "green" if message.role == "user" else "blue"
+        console.print(f"[{role_color}]{speaker}:[/] {message.content}")
+        if message.metadata:
+            meta_str = ", ".join(f"{k}={v}" for k, v in message.metadata.items() if k != "content")
+            if meta_str:
+                console.print(f"  [dim]{meta_str}[/dim]")
+    console.print("[dim]Use :view <session_id> to see the complete conversation.[/dim]\n")
+
+
+def _render_sessions(conversation_manager: ConversationManager) -> None:
+    sessions = conversation_manager.list_sessions(limit=20)
+    if not sessions:
+        console.print("[yellow]No conversation sessions found.[/yellow]\n")
+        return
+    console.print(f"[bold]Conversation Sessions ({len(sessions)} found)[/bold]\n")
+    for idx, sess in enumerate(sessions, 1):
+        console.print(f"{idx}. [cyan]{sess.session_id}[/cyan]")
+        console.print(f"   Created: [dim]{sess.created_at}[/dim]")
+        if sess.course:
+            console.print(f"   Course: [yellow]{sess.course}[/yellow]")
+        if sess.mode:
+            console.print(f"   Mode: [yellow]{sess.mode}[/yellow]")
+        if sess.summary:
+            console.print(f"   Summary: {sess.summary[:100]}...")
+        console.print()
+    console.print("[dim]Use :view <session_id> to inspect a session or resume it later.[/dim]\n")
+
+
+def _render_session_view(command: str, conversation_manager: ConversationManager) -> None:
+    parts = command.split(maxsplit=1)
+    if len(parts) != 2:
+        console.print("[yellow]Usage: :view <session_id>[/yellow]")
+        console.print("[yellow]Use :sessions to list available session IDs[/yellow]\n")
+        return
+    target_session_id = parts[1].strip()
+    all_messages = conversation_manager._store.get_messages(target_session_id)
+    session_info = conversation_manager.get_session(target_session_id)
+    if not all_messages:
+        console.print(f"[red]Session '{target_session_id}' not found or has no messages.[/red]\n")
+        return
+    if session_info:
+        console.print(f"[bold]Session: {target_session_id}[/bold]")
+        console.print(f"Created: [dim]{session_info.created_at}[/dim]")
+        if session_info.course:
+            console.print(f"Course: [yellow]{session_info.course}[/yellow]")
+        if session_info.mode:
+            console.print(f"Mode: [yellow]{session_info.mode}[/yellow]")
+        console.print()
+    console.print(f"[bold]Full Conversation History ({len(all_messages)} messages)[/bold]\n")
+    for message in all_messages:
+        speaker = "You" if message.role == "user" else "Companion"
+        role_color = "green" if message.role == "user" else "blue"
+        console.print(f"[{role_color}]{speaker}:[/] {message.content}")
+        if message.metadata:
+            meta_str = ", ".join(f"{k}={v}" for k, v in message.metadata.items() if k != "content")
+            if meta_str:
+                console.print(f"  [dim]{meta_str}[/dim]")
+        console.print()
+
+
+def _render_ace_status(runtime: RuntimeComponents | None) -> None:  # noqa: C901
+    if runtime is None:
+        console.print("[yellow]Runtime not available; ACE status is unknown.[/yellow]")
+        return
+    logger = runtime.conversation_logger
+    trigger_config = runtime.trigger_config
+    playbook_loader = runtime.playbook_loader
+    console.print("[bold]ACE Integration Status[/bold]\n")
+    if logger:
+        turn_count = logger.count_logged_turns()
+        console.print("✅ [green]Conversation Logger:[/green] Active")
+        console.print(f"   Logged turns: [cyan]{turn_count}[/cyan]")
+        console.print(f"   Log directory: [cyan]{logger._output_dir}[/cyan]")
+    else:
+        console.print("❌ [red]Conversation Logger:[/red] Not configured")
+    if trigger_config:
+        console.print("\n✅ [green]ACE Trigger Config:[/green] Configured")
+        console.print(f"   Repository path: [cyan]{trigger_config.repo_path}[/cyan]")
+        console.print(f"   Trigger threshold: [cyan]{trigger_config.trigger_threshold}[/cyan] conversations")
+        console.print(f"   Iterations: [cyan]{trigger_config.iterations}[/cyan]")
+        if trigger_config.repo_path.exists():
+            console.print("   ✅ ACE repository found")
+        else:
+            console.print(f"   ⚠️  [yellow]ACE repository not found at: {trigger_config.repo_path}[/yellow]")
+    else:
+        console.print("\n❌ [red]ACE Trigger Config:[/red] Not configured")
+    if playbook_loader:
+        console.print("\n✅ [green]Playbook Loader:[/green] Active")
+        console.print(f"   Playbook directory: [cyan]{playbook_loader._playbook_dir}[/cyan]")
+        available = playbook_loader.list_available()
+        console.print(f"   Available playbooks: [cyan]{len(available)}[/cyan]")
+        if available:
+            latest_path = available[-1]
+            console.print(f"   Latest: [cyan]{latest_path.name}[/cyan]")
+            try:
+                playbook_data = yaml.safe_load(latest_path.read_text(encoding="utf-8"))
+                metadata = playbook_data.get("metadata", {})
+                convergence = metadata.get("convergence_status", "unknown")
+                console.print("\n[bold]Current Playbook Metrics:[/bold]")
+                console.print(f"   Version: [cyan]{playbook_data.get('version', 'unknown')}[/cyan]")
+                console.print(f"   Iteration: [cyan]{metadata.get('iteration', 0)}[/cyan]")
+                console.print(f"   Convergence: [yellow]{convergence}[/yellow]")
+            except Exception as exc:
+                console.print(f"   [yellow]Could not load playbook metrics: {exc}[/yellow]")
+        console.print("")
+        if _is_ace_framework_available():
+            console.print("✅ [green]ACE Framework:[/green] Available")
+            console.print("   Generator, Reflector, and Curator agents are available")
+        else:
+            console.print("❌ [red]ACE Framework:[/red] Not installed")
+            console.print("   Make sure 'agentic-context-engineering' is available on PYTHONPATH")
+    else:
+        console.print("\n❌ [red]Playbook Loader:[/red] Not configured")
+    if logger and trigger_config:
+        turn_count = logger.count_logged_turns()
+        threshold = trigger_config.trigger_threshold
+        next_trigger = ((turn_count // threshold) + 1) * threshold
+        remaining = next_trigger - turn_count
+        console.print("\n[bold]Next ACE Cycle:[/bold]")
+        if remaining <= threshold:
+            console.print(f"   Will trigger automatically after [cyan]{remaining}[/cyan] more conversations")
+        else:
+            console.print(f"   [yellow]Not scheduled (need {remaining} more conversations)[/yellow]")
+            console.print("   [dim]Run: [cyan]genai-companion trigger-ace[/cyan][/dim]")
+    console.print()
+
+
+def _render_retrieval_debug(runtime: RuntimeComponents | None) -> None:
+    if runtime is None:
+        console.print("[yellow]Runtime not available; retrieval debug is skipped.[/yellow]\n")
+        return
+    debug_lines = runtime.answer_generator.retrieval_debug_lines()
+    if not debug_lines:
+        console.print("[yellow]No retrieval context captured yet. Ask a question first.[/yellow]\n")
+        return
+    config = runtime.retrieval.config
+    console.print("[bold]Retrieval Debug[/bold]")
+    console.print(
+        f"[dim]dense_top_k={config.dense_top_k}, keyword_top_k={config.keyword_top_k}, "
+        f"hybrid_top_k={config.hybrid_top_k}, min_score={config.min_score_threshold}[/dim]"
+    )
+    for line in debug_lines:
+        console.print(line)
+    console.print()
+
+
+def _ensure_ollama_ready(runtime: RuntimeComponents, skip_check: bool) -> None:
+    llm_settings = runtime.llm_settings
+    if llm_settings.get("provider") != "ollama" or skip_check:
+        return
+    base_url = llm_settings.get("base_url", "http://localhost:11434")
+    model_name = llm_settings.get("model", "llama3.1:8b")
+    if not check_ollama_connection(base_url):
+        console.print(
+            Panel(
+                "[bold red]Ollama is not running![/bold red]\n\n"
+                "The companion requires Ollama to be running to generate answers.\n\n"
+                "[bold]To start Ollama:[/bold]\n"
+                "  1. Open a new terminal window\n"
+                "  2. Run: [cyan]ollama serve[/cyan]\n"
+                "  3. Or start Ollama from your applications\n\n"
+                "[bold]To verify Ollama is running:[/bold]\n"
+                "  Run: [cyan]ollama list[/cyan]\n\n"
+                "[bold]For more information:[/bold]\n"
+                "  Visit: [link]https://ollama.com/[/link]\n\n"
+                "You can skip this check with [cyan]--skip-ollama-check[/cyan], "
+                "but the companion will fail when trying to generate answers.",
+                title="⚠️  Ollama Connection Error",
+                border_style="red",
+            )
+        )
+        raise click.Abort()
+    model_installed, available_models = check_ollama_model(base_url, model_name)
+    if model_installed:
+        return
+    available_list = "\n  - ".join(available_models) if available_models else "  (none installed)"
+    console.print(
+        Panel(
+            f"[bold red]Model '{model_name}' is not installed![/bold red]\n\n"
+            f"The companion requires the model [cyan]{model_name}[/cyan] to generate answers.\n\n"
+            "[bold]To install the model:[/bold]\n"
+            f"  Run: [cyan]ollama pull {model_name}[/cyan]\n\n"
+            "[bold]Currently installed models:[/bold]\n"
+            f"  {available_list}\n\n"
+            "[bold]After installing, restart the companion.[/bold]",
+            title="⚠️  Model Not Found",
+            border_style="yellow",
+        )
+    )
+    raise click.Abort()
 
 
 @click.group()
@@ -489,57 +736,10 @@ def cli() -> None:
 @click.option("--session-id", type=str, default=None, help="Resume an existing session ID.")
 @click.option("--mode", type=click.Choice([mode.value for mode in ConversationMode]), default="study")
 @click.option("--skip-ollama-check", is_flag=True, help="Skip checking if Ollama is running (not recommended)")
-def chat(config_path: Path, session_id: str | None, mode: str, skip_ollama_check: bool) -> None:
+def chat(config_path: Path, session_id: str | None, mode: str, skip_ollama_check: bool) -> None:  # noqa: C901
     """Start an interactive chat session."""
     runtime = load_runtime_from_path(config_path)
-    
-    # Check if Ollama is running and model is installed (if using Ollama provider)
-    llm_settings = runtime.llm_settings
-    if llm_settings.get("provider") == "ollama" and not skip_ollama_check:
-        base_url = llm_settings.get("base_url", "http://localhost:11434")
-        model_name = llm_settings.get("model", "llama3.1:8b")
-        
-        if not check_ollama_connection(base_url):
-            console.print(
-                Panel(
-                    "[bold red]Ollama is not running![/bold red]\n\n"
-                    "The companion requires Ollama to be running to generate answers.\n\n"
-                    "[bold]To start Ollama:[/bold]\n"
-                    "  1. Open a new terminal window\n"
-                    "  2. Run: [cyan]ollama serve[/cyan]\n"
-                    "  3. Or start Ollama from your applications\n\n"
-                    "[bold]To verify Ollama is running:[/bold]\n"
-                    "  Run: [cyan]ollama list[/cyan]\n\n"
-                    "[bold]For more information:[/bold]\n"
-                    "  Visit: [link]https://ollama.com/[/link]\n\n"
-                    "You can skip this check with [cyan]--skip-ollama-check[/cyan] flag,\n"
-                    "but the companion will fail when trying to generate answers.",
-                    title="⚠️  Ollama Connection Error",
-                    border_style="red",
-                )
-            )
-            raise click.Abort()
-        
-        # Check if the required model is installed
-        model_installed, available_models = check_ollama_model(base_url, model_name)
-        if not model_installed:
-            available_list = "\n  - ".join(available_models) if available_models else "  (none installed)"
-            console.print(
-                Panel(
-                    f"[bold red]Model '{model_name}' is not installed![/bold red]\n\n"
-                    f"The companion requires the model [cyan]{model_name}[/cyan] to generate answers.\n\n"
-                    "[bold]To install the model:[/bold]\n"
-                    f"  Run: [cyan]ollama pull {model_name}[/cyan]\n\n"
-                    "[bold]Currently installed models:[/bold]\n"
-                    f"  {available_list}\n\n"
-                    "[bold]After installing, restart the companion.[/bold]\n\n"
-                    "You can skip this check with [cyan]--skip-ollama-check[/cyan] flag,\n"
-                    "but the companion will fail when trying to generate answers.",
-                    title="⚠️  Model Not Found",
-                    border_style="yellow",
-                )
-            )
-            raise click.Abort()
+    _ensure_ollama_ready(runtime, skip_ollama_check)
     conversation_manager = runtime.conversation_manager
     answer_generator = runtime.answer_generator
     query_processor = runtime.query_processor
@@ -600,203 +800,10 @@ def chat(config_path: Path, session_id: str | None, mode: str, skip_ollama_check
             pending_attachments=pending_attachments,
             mode_ref=mode_ref,
             runtime=runtime,
+            conversation_manager=conversation_manager,
+            session_id=session_id,
         ):
             current_mode = mode_ref["current"]
-            continue
-        if lowered == ":history":
-            history = runtime.conversation_manager.get_recent_context(session_id)
-            if not history:
-                console.print("[yellow]No conversation history found for current session.[/yellow]")
-                console.print("[dim]Tip: use :sessions to see other session IDs.[/dim]")
-            else:
-                console.print(f"[bold]Conversation History (Session: {session_id})[/bold]\n")
-                for message in history:
-                    speaker = "You" if message.role == "user" else "Companion"
-                    role_color = "green" if message.role == "user" else "blue"
-                    console.print(f"[{role_color}]{speaker}:[/] {message.content}")
-                    if message.metadata:
-                        meta_str = ", ".join(f"{k}={v}" for k, v in message.metadata.items() if k != "content")
-                        if meta_str:
-                            console.print(f"  [dim]{meta_str}[/dim]")
-                console.print("[dim]Use :view <session_id> to see the complete conversation.[/dim]")
-            console.print()  # Empty line
-            continue
-        if lowered == ":sessions":
-            sessions = runtime.conversation_manager.list_sessions(limit=20)
-            if not sessions:
-                console.print("[yellow]No conversation sessions found.[/yellow]\n")
-            else:
-                console.print(f"[bold]Conversation Sessions ({len(sessions)} found)[/bold]\n")
-                for idx, sess in enumerate(sessions, 1):
-                    console.print(f"{idx}. [cyan]{sess.session_id}[/cyan]")
-                    console.print(f"   Created: [dim]{sess.created_at}[/dim]")
-                    if sess.course:
-                        console.print(f"   Course: [yellow]{sess.course}[/yellow]")
-                    if sess.mode:
-                        console.print(f"   Mode: [yellow]{sess.mode}[/yellow]")
-                    if sess.summary:
-                        console.print(f"   Summary: {sess.summary[:100]}...")
-                    console.print()
-                console.print("[dim]Use :view <session_id> to inspect a session, or pass --session-id to resume it from the CLI.[/dim]\n")
-            continue
-        if lowered.startswith(":view"):
-            parts = stripped.split(maxsplit=1)
-            if len(parts) == 2:
-                target_session_id = parts[1].strip()
-                # Get all messages for this session (not just recent context)
-                all_messages = runtime.conversation_manager._store.get_messages(target_session_id)  # noqa: SLF001
-                session_info = runtime.conversation_manager.get_session(target_session_id)
-                
-                if not all_messages:
-                    console.print(f"[red]Session '{target_session_id}' not found or has no messages.[/red]\n")
-                else:
-                    if session_info:
-                        console.print(f"[bold]Session: {target_session_id}[/bold]")
-                        console.print(f"Created: [dim]{session_info.created_at}[/dim]")
-                        if session_info.course:
-                            console.print(f"Course: [yellow]{session_info.course}[/yellow]")
-                        if session_info.mode:
-                            console.print(f"Mode: [yellow]{session_info.mode}[/yellow]")
-                        console.print()
-                    
-                    console.print(f"[bold]Full Conversation History ({len(all_messages)} messages)[/bold]\n")
-                    for message in all_messages:
-                        speaker = "You" if message.role == "user" else "Companion"
-                        role_color = "green" if message.role == "user" else "blue"
-                        console.print(f"[{role_color}]{speaker}:[/] {message.content}")
-                        if message.metadata:
-                            meta_str = ", ".join(f"{k}={v}" for k, v in message.metadata.items() if k != "content")
-                            if meta_str:
-                                console.print(f"  [dim]{meta_str}[/dim]")
-                        console.print()  # Empty line between messages
-            else:
-                console.print("[yellow]Usage: :view <session_id>[/yellow]")
-                console.print("[yellow]Use :sessions to list available session IDs[/yellow]\n")
-            continue
-        if lowered == ":ace-status":
-            logger = runtime.conversation_logger
-            trigger_config = runtime.trigger_config
-            playbook_loader = runtime.playbook_loader
-            
-            console.print("[bold]ACE Integration Status[/bold]\n")
-            
-            # Check conversation logging
-            if logger:
-                turn_count = logger.count_logged_turns()
-                console.print(f"✅ [green]Conversation Logger:[/green] Active")
-                console.print(f"   Logged turns: [cyan]{turn_count}[/cyan]")
-                console.print(f"   Log directory: [cyan]{logger._output_dir}[/cyan]")
-            else:
-                console.print(f"❌ [red]Conversation Logger:[/red] Not configured")
-            
-            # Check trigger configuration
-            if trigger_config:
-                console.print(f"\n✅ [green]ACE Trigger Config:[/green] Configured")
-                console.print(f"   Repository path: [cyan]{trigger_config.repo_path}[/cyan]")
-                console.print(f"   Trigger threshold: [cyan]{trigger_config.trigger_threshold}[/cyan] conversations")
-                console.print(f"   Iterations: [cyan]{trigger_config.iterations}[/cyan]")
-                
-                # Check if ACE repo exists
-                if trigger_config.repo_path.exists():
-                    console.print(f"   ✅ ACE repository found")
-                else:
-                    console.print(f"   ⚠️  [yellow]ACE repository not found at: {trigger_config.repo_path}[/yellow]")
-            else:
-                console.print(f"\n❌ [red]ACE Trigger Config:[/red] Not configured")
-            
-            # Check playbook loader
-            if playbook_loader:
-                console.print(f"\n✅ [green]Playbook Loader:[/green] Active")
-                console.print(f"   Playbook directory: [cyan]{playbook_loader._playbook_dir}[/cyan]")
-                available = playbook_loader.list_available()
-                console.print(f"   Available playbooks: [cyan]{len(available)}[/cyan]")
-                if available:
-                    latest_path = available[-1]
-                    console.print(f"   Latest: [cyan]{latest_path.name}[/cyan]")
-                    
-                    # Load and display playbook metrics
-                    try:
-                        playbook_data = yaml.safe_load(latest_path.read_text(encoding="utf-8"))
-                        metadata = playbook_data.get("metadata", {})
-                        perf_metrics = metadata.get("performance_metrics", {})
-                        convergence = metadata.get("convergence_status", "unknown")
-                        iteration = metadata.get("iteration", 0)
-                        
-                        console.print(f"\n[bold]Current Playbook Metrics:[/bold]")
-                        console.print(f"   Version: [cyan]{playbook_data.get('version', 'unknown')}[/cyan]")
-                        console.print(f"   Iteration: [cyan]{iteration}[/cyan]")
-                        
-                        # Convergence status with color coding
-                        if convergence == "converged":
-                            console.print(f"   Convergence: [green]{convergence}[/green]")
-                        elif convergence == "degraded":
-                            console.print(f"   Convergence: [red]{convergence}[/red]")
-                        else:
-                            console.print(f"   Convergence: [yellow]{convergence}[/yellow]")
-                        
-                        if perf_metrics:
-                            console.print(f"   Accuracy: {perf_metrics.get('accuracy', 0.0):.3f}")
-                            console.print(f"   Semantic Similarity: {perf_metrics.get('semantic_similarity', 0.0):.3f}")
-                            console.print(f"   BLEU Score: {perf_metrics.get('bleu_score', 0.0):.4f}")
-                            console.print(f"   ROUGE Score: {perf_metrics.get('rouge_score', 0.0):.4f}")
-                        
-                        # Recommendations based on convergence status
-                        console.print(f"\n[bold]Recommendations:[/bold]")
-                        if convergence == "degraded":
-                            console.print(f"   [yellow]⚠️  Playbook convergence is degraded. Consider running ACE cycles:[/yellow]")
-                            console.print(f"      [cyan]genai-companion trigger-ace[/cyan]")
-                        elif convergence == "converged":
-                            console.print(f"   [green]✅ Playbook is converged. No action needed.[/green]")
-                        else:
-                            console.print(f"   [yellow]Playbook status is unknown. Monitor performance.[/yellow]")
-                        
-                        # Historical playbooks
-                        if len(available) > 1:
-                            console.print(f"\n[bold]Historical Playbooks:[/bold]")
-                            for pb_path in available[-5:]:  # Show last 5
-                                console.print(f"   - [dim]{pb_path.name}[/dim]")
-                    except Exception as e:
-                        console.print(f"   [yellow]Could not load playbook metrics: {e}[/yellow]")
-                
-                console.print("")
-                if _is_ace_framework_available():
-                    console.print("✅ [green]ACE Framework:[/green] Available")
-                    console.print("   Generator, Reflector, and Curator agents are available")
-                else:
-                    console.print("❌ [red]ACE Framework:[/red] Not installed")
-                    console.print("   Make sure 'agentic-context-engineering' is available on PYTHONPATH")
-            else:
-                console.print(f"\n❌ [red]Playbook Loader:[/red] Not configured")
-            
-            # Check if ACE will trigger soon
-            if logger and trigger_config:
-                turn_count = logger.count_logged_turns()
-                threshold = trigger_config.trigger_threshold
-                next_trigger = ((turn_count // threshold) + 1) * threshold
-                remaining = next_trigger - turn_count
-                console.print(f"\n[bold]Next ACE Cycle:[/bold]")
-                if remaining <= threshold:
-                    console.print(f"   Will trigger automatically after [cyan]{remaining}[/cyan] more conversations")
-                else:
-                    console.print(f"   [yellow]Not scheduled (need {remaining} more conversations)[/yellow]")
-                    console.print(f"   [dim]You can manually trigger with: [cyan]genai-companion trigger-ace[/cyan][/dim]")
-            
-            console.print()  # Empty line for spacing
-            continue
-        if lowered == ":debug-retrieval":
-            debug_lines = runtime.answer_generator.retrieval_debug_lines()
-            if not debug_lines:
-                console.print("[yellow]No retrieval context captured yet. Ask a question first.[/yellow]\n")
-            else:
-                config = runtime.retrieval.config
-                console.print("[bold]Retrieval Debug[/bold]")
-                console.print(
-                    f"[dim]dense_top_k={config.dense_top_k}, keyword_top_k={config.keyword_top_k}, "
-                    f"hybrid_top_k={config.hybrid_top_k}, min_score={config.min_score_threshold}[/dim]"
-                )
-                for line in debug_lines:
-                    console.print(line)
-                console.print()
             continue
 
         try:
@@ -827,13 +834,14 @@ def chat(config_path: Path, session_id: str | None, mode: str, skip_ollama_check
                 "width": console.size.width,
             }
             last_citations = [
-                {"source": citation.source, "snippet": citation.snippet}
-                for citation in formatted.citations
+                {"source": citation.source, "snippet": citation.snippet} for citation in formatted.citations
             ]
             pending_attachments = []
         except GenerationError as exc:
             console.print(Panel(str(exc), title="[bold red]Error[/bold red]", border_style="red"))
-            console.print("\n[yellow]Tip:[/yellow] Make sure Ollama is running. Run [cyan]ollama serve[/cyan] in another terminal.\n")
+            console.print(
+                "\n[yellow]Tip:[/yellow] Make sure Ollama is running. Run [cyan]ollama serve[/cyan] in another terminal.\n"
+            )
 
 
 @cli.command()
@@ -841,13 +849,11 @@ def chat(config_path: Path, session_id: str | None, mode: str, skip_ollama_check
 @click.option("--force", is_flag=True, help="Skip confirmation prompt")
 def reset_vector_store(config_path: Path, force: bool) -> None:
     """Reset the ChromaDB vector store, backing up existing data if present.
-    
+
     This command is useful when the vector store is corrupted or needs to be reinitialized.
     After reset, you will need to re-ingest your documents.
     """
-    from datetime import datetime
-    import shutil
-    
+
     companion_config = CompanionConfig.from_file(config_path)
     perform_vector_store_reset(companion_config, force=force)
 
@@ -857,7 +863,7 @@ def reset_vector_store(config_path: Path, force: bool) -> None:
 @click.option("--iterations", type=int, default=None, help="Number of ACE iterations to run (defaults to config value)")
 def trigger_ace(config_path: Path, iterations: int | None) -> None:
     """Manually trigger ACE improvement cycles to refine the playbook.
-    
+
     This command runs the ACE framework's generator, reflector, and curator loops
     using logged conversation data to improve the playbook.
     """
@@ -907,4 +913,3 @@ def evaluate_command(
 
 if __name__ == "__main__":  # pragma: no cover
     cli()
-

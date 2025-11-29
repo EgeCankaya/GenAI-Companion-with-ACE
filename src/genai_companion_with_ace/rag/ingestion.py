@@ -381,4 +381,3 @@ def infer_metadata_from_path(path: Path) -> dict[str, Any]:
     if parts:
         metadata["source_hint"] = os.path.join(*parts[:-1]) if len(parts) > 1 else path.parent.name
     return metadata
-

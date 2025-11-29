@@ -14,9 +14,9 @@ from genai_companion_with_ace.config import CompanionConfig
 from genai_companion_with_ace.llm import LangChainLLMAdapter
 from genai_companion_with_ace.rag import (
     AnswerGenerator,
-    GenerationConfig,
     DocumentIngestionPipeline,
     EmbeddingFactory,
+    GenerationConfig,
     RetrievalOrchestrator,
     VectorStoreManager,
 )
@@ -115,4 +115,3 @@ def load_runtime_from_path(config_path: Path) -> RuntimeComponents:
     """Load configuration and bootstrap all runtime services."""
     companion_config = CompanionConfig.from_file(config_path)
     return build_runtime_components(companion_config)
-

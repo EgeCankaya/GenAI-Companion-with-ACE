@@ -80,12 +80,10 @@ def to_document_text(example: dict[str, Any]) -> str:
         golden or "N/A",
     ]
     if must_include or should_cite:
-        lines.extend(
-            [
-                "",
-                "## Evaluation Criteria",
-            ]
-        )
+        lines.extend([
+            "",
+            "## Evaluation Criteria",
+        ])
         if must_include:
             lines.append(f"- Must include: {must_include}")
         if should_cite:
@@ -148,10 +146,9 @@ def main() -> None:
 
     print(
         f"Ingested {doc_count} evaluation questions "
-        f"({chunk_count} chunks) into collection '{retrieval._vector_store.collection_name}'.",  # noqa: SLF001
+        f"({chunk_count} chunks) into collection '{retrieval._vector_store.collection_name}'.",
     )
 
 
 if __name__ == "__main__":
     main()
-

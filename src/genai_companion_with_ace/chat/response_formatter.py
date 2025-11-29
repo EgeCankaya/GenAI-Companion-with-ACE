@@ -26,7 +26,7 @@ class FormattedResponse:
     def render(self, include_citations: bool = False, include_followups: bool = True) -> str:
         """
         Render the formatted response.
-        
+
         Args:
             include_citations: Whether to include the Sources section at the end.
                               Defaults to False since inline citations are already in the answer.
@@ -93,9 +93,7 @@ class ResponseFormatter:
         reason: str,
         follow_up_suggestion: str | None = None,
     ) -> FormattedResponse:
-        base_message = (
-            "I do not have enough information in the indexed IBM course materials to answer that question."
-        )
+        base_message = "I do not have enough information in the indexed IBM course materials to answer that question."
         if reason:
             base_message += f" Reason: {reason}."
         follow_ups = [follow_up_suggestion] if follow_up_suggestion else []
@@ -123,4 +121,3 @@ class ResponseFormatter:
     def _prepend_objectives(answer: str) -> str:
         objectives_header = "Learning objectives:\n- Understand the concept.\n- Review related examples.\n\n"
         return objectives_header + answer
-

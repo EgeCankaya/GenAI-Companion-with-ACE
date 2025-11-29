@@ -26,4 +26,3 @@ def save_metrics_report(
         lines.append(f"- **{metric.replace('_', ' ').title()}**: {value:.3f}")
     markdown_path.write_text("\n".join(lines), encoding="utf-8")
     return json_path
-

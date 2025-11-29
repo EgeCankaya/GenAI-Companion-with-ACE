@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import socket
 from typing import Any
 
 import requests
@@ -12,7 +11,7 @@ def check_ollama_connection(base_url: str = "http://localhost:11434", timeout: i
     """Check if Ollama is running and accessible."""
     try:
         response = requests.get(f"{base_url}/api/tags", timeout=timeout)
-    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, socket.error):
+    except (OSError, requests.exceptions.ConnectionError, requests.exceptions.Timeout):
         return False
     return response.status_code == 200
 
@@ -22,21 +21,14 @@ def check_ollama_model(base_url: str, model_name: str, timeout: int = 2) -> tupl
     try:
         response = requests.get(f"{base_url}/api/tags", timeout=timeout)
         data = response.json()
-    except (
-        requests.exceptions.ConnectionError,
-        requests.exceptions.Timeout,
-        socket.error,
-        ValueError,
-    ):
+    except (OSError, requests.exceptions.ConnectionError, requests.exceptions.Timeout, ValueError):
         return False, []
     if response.status_code != 200:
         return False, []
 
     models = [model.get("name", "") for model in data.get("models", [])]
     model_installed = any(
-        model_name == model
-        or model_name.startswith(model.split(":")[0])
-        or model.startswith(model_name.split(":")[0])
+        model_name == model or model_name.startswith(model.split(":")[0]) or model.startswith(model_name.split(":")[0])
         for model in models
     )
     return model_installed, models
@@ -88,4 +80,3 @@ class LangChainLLMAdapter:
         if isinstance(response, str):
             return response
         return getattr(response, "content", str(response))
-

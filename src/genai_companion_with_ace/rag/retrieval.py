@@ -184,4 +184,3 @@ class RetrievalOrchestrator:
         chunk_id = metadata.get("chunk_id")
         document_id = metadata.get("document_id") or metadata.get("source")
         return f"{document_id}:{chunk_id}"
-

@@ -33,4 +33,3 @@ def test_evaluation_engine_scores_answers_without_contexts() -> None:
     aggregate = engine.aggregate(results)
     assert "answer_relevancy" in aggregate
     assert 0.0 <= aggregate["answer_relevancy"] <= 1.0
-

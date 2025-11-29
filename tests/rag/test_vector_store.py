@@ -34,4 +34,3 @@ def test_vector_store_add_and_reset(tmp_path: Path) -> None:
     manager.reset()
     post_reset_results = manager.as_retriever(search_kwargs={"k": 1}).invoke("attention")
     assert post_reset_results == []
-

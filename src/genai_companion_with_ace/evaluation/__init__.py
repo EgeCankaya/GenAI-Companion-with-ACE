@@ -15,4 +15,3 @@ __all__ = [
     "generate_synthetic_dataset",
     "save_metrics_report",
 ]
-

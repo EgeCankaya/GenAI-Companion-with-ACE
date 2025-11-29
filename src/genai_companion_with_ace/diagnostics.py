@@ -7,6 +7,7 @@ import platform
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+
 from langchain_core.embeddings import Embeddings
 
 from genai_companion_with_ace.config import CompanionConfig
@@ -44,7 +45,7 @@ class _DiagnosticsEmbeddings(Embeddings):
 
 def _check_python_version() -> DiagnosticResult:
     major, minor = sys.version_info.major, sys.version_info.minor
-    if 3 <= major and 9 <= minor <= 13:
+    if major >= 3 and 9 <= minor <= 13:
         return DiagnosticResult("ok", f"Python {platform.python_version()} detected.")
     return DiagnosticResult(
         "warn",
@@ -115,5 +116,4 @@ def run_diagnostics(config: CompanionConfig) -> dict[str, dict[str, str]]:
     return results
 
 
-__all__ = ["run_diagnostics", "DiagnosticResult"]
-
+__all__ = ["DiagnosticResult", "run_diagnostics"]

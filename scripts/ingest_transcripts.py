@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Iterable, Sequence
 
 from genai_companion_with_ace.config import CompanionConfig
 from genai_companion_with_ace.rag import (
@@ -137,11 +137,9 @@ def main() -> None:
 
     print(
         f"Ingested {file_count} transcript files ({chunk_count} chunks) into collection "
-        f"'{retrieval._vector_store.collection_name}'.",  # noqa: SLF001
+        f"'{retrieval._vector_store.collection_name}'.",
     )
 
 
 if __name__ == "__main__":
     main()
-
-

@@ -33,4 +33,3 @@ def test_save_metrics_report_creates_json_and_markdown(tmp_path: Path) -> None:
     assert report_path.exists()
     markdown = tmp_path / "test_report.md"
     assert markdown.exists()
-

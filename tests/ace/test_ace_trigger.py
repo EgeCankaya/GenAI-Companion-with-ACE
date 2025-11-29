@@ -66,4 +66,3 @@ def test_run_ace_cycles_with_fake_runner(tmp_path: Path) -> None:
     )
 
     assert context.version == "9.9.9"
-

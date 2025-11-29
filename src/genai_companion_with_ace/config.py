@@ -185,5 +185,3 @@ class CompanionConfig:
         if isinstance(cli_cfg, dict):
             resolved.update(cli_cfg)
         return resolved
-
-

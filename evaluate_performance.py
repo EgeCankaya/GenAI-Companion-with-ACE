@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import statistics
-from collections import Counter, defaultdict
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -163,9 +163,7 @@ class PerformanceEvaluator:
                 stats.avg_messages_per_session = stats.total_messages / stats.total_sessions
 
             # Sessions by mode
-            cursor = conn.execute(
-                "SELECT mode, COUNT(*) as count FROM sessions WHERE mode IS NOT NULL GROUP BY mode"
-            )
+            cursor = conn.execute("SELECT mode, COUNT(*) as count FROM sessions WHERE mode IS NOT NULL GROUP BY mode")
             for row in cursor:
                 stats.sessions_by_mode[row["mode"]] = row["count"]
 
@@ -231,7 +229,11 @@ class PerformanceEvaluator:
                 error_msg = str(e)
                 error_type = type(e).__name__
                 # Handle ChromaDB corruption or version issues
-                if "panic" in error_msg.lower() or "out of range" in error_msg.lower() or "PanicException" in error_type:
+                if (
+                    "panic" in error_msg.lower()
+                    or "out of range" in error_msg.lower()
+                    or "PanicException" in error_type
+                ):
                     return {
                         "status": "corrupted_or_incompatible",
                         "path": str(self.chroma_path),
@@ -320,7 +322,7 @@ class PerformanceEvaluator:
 
             # Analyze history for patterns
             history_analysis = self._analyze_playbook_history(history)
-            
+
             # Analyze heuristic usage from conversation logs
             heuristic_usage = self._analyze_heuristic_usage(heuristics)
 
@@ -375,61 +377,79 @@ class PerformanceEvaluator:
             "changes_by_iteration": dict(iterations),
             "most_common_change": change_types.most_common(1)[0] if change_types else None,
         }
-    
+
     def _analyze_heuristic_usage(self, heuristics: list[dict]) -> dict[str, Any]:
         """Analyze heuristic usage from conversation logs."""
         if not self.conversation_logs_dir.exists():
             return {"status": "no_logs", "message": "Conversation logs not available"}
-        
-        # Build heuristic ID to rule mapping
         heuristic_map = {h.get("id", ""): h for h in heuristics}
-        
-        # Count usage from conversation logs
-        usage_counts: dict[str, int] = {}
-        total_turns_with_heuristics = 0
-        
-        jsonl_files = list(self.conversation_logs_dir.glob("*.jsonl"))
-        for jsonl_file in jsonl_files:
-            if jsonl_file.name == "history.db":
-                continue
-            try:
-                with jsonl_file.open(encoding="utf-8") as f:
-                    for line in f:
-                        try:
-                            record = json.loads(line)
-                            metadata = record.get("metadata", {})
-                            heuristic_ids_str = metadata.get("heuristic_ids", "")
-                            
-                            if heuristic_ids_str:
-                                total_turns_with_heuristics += 1
-                                # Parse comma-separated heuristic IDs
-                                for h_id in heuristic_ids_str.split(","):
-                                    h_id = h_id.strip()
-                                    if h_id:
-                                        usage_counts[h_id] = usage_counts.get(h_id, 0) + 1
-                        except json.JSONDecodeError:
-                            continue
-            except Exception:
-                continue
-        
-        # Calculate usage statistics
-        heuristic_stats = []
-        for h_id, h_data in heuristic_map.items():
-            usage_count = usage_counts.get(h_id, 0)
-            heuristic_stats.append({
-                "id": h_id,
-                "usage_count": usage_count,
-                "usage_percentage": round((usage_count / total_turns_with_heuristics * 100) if total_turns_with_heuristics > 0 else 0, 1),
-                "confidence": h_data.get("confidence", 0.0),
-                "success_rate": h_data.get("success_rate", 0.0),
-            })
-        
+        usage_counts, total_turns_with_heuristics = self._collect_heuristic_usage()
+        heuristic_stats = self._build_heuristic_stats(heuristic_map, usage_counts, total_turns_with_heuristics)
         return {
             "total_turns_analyzed": total_turns_with_heuristics,
             "heuristic_stats": heuristic_stats,
             "total_heuristics": len(heuristics),
             "heuristics_with_usage": len([h for h in heuristic_stats if h["usage_count"] > 0]),
         }
+
+    def _collect_heuristic_usage(self) -> tuple[dict[str, int], int]:
+        usage_counts: dict[str, int] = {}
+        total_turns = 0
+        for jsonl_file in self._conversation_log_files():
+            total_turns += self._update_usage_from_file(jsonl_file, usage_counts)
+        return usage_counts, total_turns
+
+    def _conversation_log_files(self) -> list[Path]:
+        return [path for path in self.conversation_logs_dir.glob("*.jsonl") if path.name != "history.db"]
+
+    def _update_usage_from_file(self, jsonl_file: Path, usage_counts: dict[str, int]) -> int:
+        turns_with_heuristics = 0
+        try:
+            with jsonl_file.open(encoding="utf-8") as handle:
+                for line in handle:
+                    record = self._safe_json_load(line)
+                    if not record:
+                        continue
+                    metadata = record.get("metadata", {})
+                    heuristic_ids_str = metadata.get("heuristic_ids", "")
+                    if not heuristic_ids_str:
+                        continue
+                    turns_with_heuristics += 1
+                    for h_id in heuristic_ids_str.split(","):
+                        identifier = h_id.strip()
+                        if identifier:
+                            usage_counts[identifier] = usage_counts.get(identifier, 0) + 1
+        except Exception:
+            return 0
+        return turns_with_heuristics
+
+    @staticmethod
+    def _safe_json_load(line: str) -> dict[str, Any] | None:
+        try:
+            return json.loads(line)
+        except json.JSONDecodeError:
+            return None
+
+    @staticmethod
+    def _build_heuristic_stats(
+        heuristic_map: dict[str, dict],
+        usage_counts: dict[str, int],
+        total_turns_with_heuristics: int,
+    ) -> list[dict[str, Any]]:
+        stats: list[dict[str, Any]] = []
+        for h_id, h_data in heuristic_map.items():
+            usage_count = usage_counts.get(h_id, 0)
+            stats.append({
+                "id": h_id,
+                "usage_count": usage_count,
+                "usage_percentage": round(
+                    (usage_count / total_turns_with_heuristics * 100) if total_turns_with_heuristics > 0 else 0,
+                    1,
+                ),
+                "confidence": h_data.get("confidence", 0.0),
+                "success_rate": h_data.get("success_rate", 0.0),
+            })
+        return stats
 
     def evaluate_conversations(self) -> dict[str, Any]:
         """Evaluate conversation logs for agent success metrics."""
@@ -455,50 +475,20 @@ class PerformanceEvaluator:
         timestamps = []
         sessions_with_sources_set = set()
 
-        jsonl_files = list(self.conversation_logs_dir.glob("*.jsonl"))
+        jsonl_files = self._conversation_log_files()
         if not jsonl_files:
             return {"status": "no_logs", "path": str(self.conversation_logs_dir)}
 
         for jsonl_file in jsonl_files:
-            if jsonl_file.name == "history.db":  # Skip if DB file is in same dir
-                continue
-
-            try:
-                with jsonl_file.open(encoding="utf-8") as f:
-                    for line in f:
-                        try:
-                            record = json.loads(line)
-                            session_ids.add(record.get("session_id", "unknown"))
-                            metrics.total_turns += 1
-
-                            question = record.get("question", "")
-                            answer = record.get("answer", "")
-                            question_lengths.append(len(question))
-                            answer_lengths.append(len(answer))
-
-                            # Sources
-                            sources = record.get("retrieved_sources", [])
-                            if sources:
-                                sessions_with_sources_set.add(record.get("session_id"))
-                                metrics.total_sources_retrieved += len(sources)
-
-                            # Metadata
-                            metadata = record.get("metadata", {})
-                            mode = metadata.get("mode", "unknown")
-                            course = metadata.get("course", "unknown")
-                            metrics.modes_used[mode] = metrics.modes_used.get(mode, 0) + 1
-                            metrics.courses_covered[course] = metrics.courses_covered.get(course, 0) + 1
-
-                            # Timestamps
-                            timestamp = record.get("timestamp")
-                            if timestamp:
-                                timestamps.append(timestamp)
-
-                        except json.JSONDecodeError:
-                            continue
-            except Exception as e:
-                print(f"Warning: Error reading {jsonl_file}: {e}")
-                continue
+            self._process_conversation_file(
+                jsonl_file,
+                metrics,
+                session_ids,
+                question_lengths,
+                answer_lengths,
+                sessions_with_sources_set,
+                timestamps,
+            )
 
         metrics.unique_sessions = len(session_ids)
         metrics.sessions_with_sources = len(sessions_with_sources_set)
@@ -518,22 +508,65 @@ class PerformanceEvaluator:
             metrics.sessions_with_sources / metrics.unique_sessions if metrics.unique_sessions > 0 else 0.0
         )
 
+        return self._build_conversation_summary(metrics, source_coverage_rate, jsonl_files)
+
+    def _process_conversation_file(
+        self,
+        jsonl_file: Path,
+        metrics: ConversationMetrics,
+        session_ids: set[str],
+        question_lengths: list[int],
+        answer_lengths: list[int],
+        sessions_with_sources_set: set[str],
+        timestamps: list[str],
+    ) -> None:
+        try:
+            with jsonl_file.open(encoding="utf-8") as handle:
+                for line in handle:
+                    record = self._safe_json_load(line)
+                    if record is None:
+                        continue
+                    session_ids.add(record.get("session_id", "unknown"))
+                    metrics.total_turns += 1
+                    question_lengths.append(len(record.get("question", "")))
+                    answer_lengths.append(len(record.get("answer", "")))
+                    sources = record.get("retrieved_sources", [])
+                    if sources:
+                        sessions_with_sources_set.add(record.get("session_id"))
+                        metrics.total_sources_retrieved += len(sources)
+                    metadata = record.get("metadata", {})
+                    mode = metadata.get("mode", "unknown")
+                    course = metadata.get("course", "unknown")
+                    metrics.modes_used[mode] = metrics.modes_used.get(mode, 0) + 1
+                    metrics.courses_covered[course] = metrics.courses_covered.get(course, 0) + 1
+                    timestamp = record.get("timestamp")
+                    if timestamp:
+                        timestamps.append(timestamp)
+        except Exception as exc:
+            print(f"Warning: Error reading {jsonl_file}: {exc}")
+
+    def _build_conversation_summary(
+        self,
+        metrics: ConversationMetrics,
+        source_coverage_rate: float,
+        jsonl_files: list[Path],
+    ) -> dict[str, Any]:
+        avg_turns = round(metrics.total_turns / metrics.unique_sessions, 2) if metrics.unique_sessions > 0 else 0.0
+        answer_to_question_ratio = (
+            round(metrics.avg_answer_length / metrics.avg_question_length, 2)
+            if metrics.avg_question_length > 0
+            else 0.0
+        )
         return {
             "status": "analyzed",
             "path": str(self.conversation_logs_dir),
             "total_turns": metrics.total_turns,
             "unique_sessions": metrics.unique_sessions,
-            "avg_turns_per_session": round(metrics.total_turns / metrics.unique_sessions, 2)
-            if metrics.unique_sessions > 0
-            else 0.0,
+            "avg_turns_per_session": avg_turns,
             "answer_quality": {
                 "avg_answer_length": round(metrics.avg_answer_length, 0),
                 "avg_question_length": round(metrics.avg_question_length, 0),
-                "answer_to_question_ratio": round(
-                    metrics.avg_answer_length / metrics.avg_question_length, 2
-                )
-                if metrics.avg_question_length > 0
-                else 0.0,
+                "answer_to_question_ratio": answer_to_question_ratio,
             },
             "retrieval_quality": {
                 "sessions_with_sources": metrics.sessions_with_sources,
@@ -553,51 +586,10 @@ class PerformanceEvaluator:
         """Generate overall assessment from all evaluations."""
         assessment = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "health_status": "unknown",
-            "recommendations": [],
+            "health_status": self._overall_health(results),
+            "recommendations": self._build_recommendations(results),
             "summary": {},
         }
-
-        # Check database health
-        sqlite_status = results.get("sqlite_db", {}).get("status", "unknown")
-        vector_status = results.get("vector_store", {}).get("status", "unknown")
-        playbook_status = results.get("playbook", {}).get("status", "unknown")
-        conv_status = results.get("conversations", {}).get("status", "unknown")
-
-        # Overall health
-        if all(s in ("healthy", "loaded", "analyzed") for s in [sqlite_status, vector_status, playbook_status, conv_status]):
-            assessment["health_status"] = "healthy"
-        elif any(s == "error" for s in [sqlite_status, vector_status, playbook_status, conv_status]):
-            assessment["health_status"] = "degraded"
-        else:
-            assessment["health_status"] = "partial"
-
-        # Generate recommendations
-        if sqlite_status == "not_found":
-            assessment["recommendations"].append("SQLite database not found - no conversation history stored")
-        elif sqlite_status == "healthy":
-            sessions = results.get("sqlite_db", {}).get("total_sessions", 0)
-            if sessions == 0:
-                assessment["recommendations"].append("No conversation sessions found in database")
-
-        if vector_status == "not_found":
-            assessment["recommendations"].append("Chroma vector store not found - RAG may not be functional")
-        elif vector_status == "collection_not_found":
-            assessment["recommendations"].append(
-                f"Chroma collection '{self.chroma_collection}' not found - documents may need to be ingested"
-            )
-
-        if playbook_status == "not_found":
-            assessment["recommendations"].append("ACE playbook not found - using default behavior")
-        elif playbook_status == "loaded":
-            convergence = results.get("playbook", {}).get("convergence_status", "unknown")
-            if convergence == "degraded":
-                assessment["recommendations"].append("Playbook convergence status is 'degraded' - consider running ACE cycles")
-
-        if conv_status == "no_logs":
-            assessment["recommendations"].append("No conversation logs found - agent has not been used yet")
-
-        # Summary statistics
         assessment["summary"] = {
             "total_sessions": results.get("sqlite_db", {}).get("total_sessions", 0),
             "total_conversation_turns": results.get("conversations", {}).get("total_turns", 0),
@@ -608,14 +600,69 @@ class PerformanceEvaluator:
 
         return assessment
 
+    @staticmethod
+    def _overall_health(results: dict[str, Any]) -> str:
+        statuses = [
+            results.get("sqlite_db", {}).get("status", "unknown"),
+            results.get("vector_store", {}).get("status", "unknown"),
+            results.get("playbook", {}).get("status", "unknown"),
+            results.get("conversations", {}).get("status", "unknown"),
+        ]
+        if all(status in ("healthy", "loaded", "analyzed") for status in statuses):
+            return "healthy"
+        if any(status == "error" for status in statuses):
+            return "degraded"
+        return "partial"
+
+    def _build_recommendations(self, results: dict[str, Any]) -> list[str]:
+        recommendations: list[str] = []
+        sqlite_status = results.get("sqlite_db", {}).get("status", "unknown")
+        vector_status = results.get("vector_store", {}).get("status", "unknown")
+        playbook_status = results.get("playbook", {}).get("status", "unknown")
+        conv_status = results.get("conversations", {}).get("status", "unknown")
+
+        if sqlite_status == "not_found":
+            recommendations.append("SQLite database not found - no conversation history stored")
+        elif sqlite_status == "healthy" and results.get("sqlite_db", {}).get("total_sessions", 0) == 0:
+            recommendations.append("No conversation sessions found in database")
+
+        if vector_status == "not_found":
+            recommendations.append("Chroma vector store not found - RAG may not be functional")
+        elif vector_status == "collection_not_found":
+            recommendations.append(
+                f"Chroma collection '{self.chroma_collection}' not found - documents may need to be ingested"
+            )
+
+        if playbook_status == "not_found":
+            recommendations.append("ACE playbook not found - using default behavior")
+        elif playbook_status == "loaded":
+            convergence = results.get("playbook", {}).get("convergence_status", "unknown")
+            if convergence == "degraded":
+                recommendations.append("Playbook convergence status is 'degraded' - consider running ACE cycles")
+
+        if conv_status == "no_logs":
+            recommendations.append("No conversation logs found - agent has not been used yet")
+
+        return recommendations
+
     def generate_report(self, results: dict[str, Any], output_path: Path) -> Path:
         """Generate a comprehensive markdown report."""
         lines = ["# GenAI Companion with ACE - Performance Evaluation Report", ""]
         lines.append(f"**Generated:** {results['overall']['timestamp']}")
         lines.append(f"**Overall Health Status:** {results['overall']['health_status'].upper()}")
         lines.append("")
+        self._append_summary(lines, results)
+        self._append_sqlite_section(lines, results.get("sqlite_db", {}))
+        self._append_vector_section(lines, results.get("vector_store", {}))
+        self._append_playbook_section(lines, results.get("playbook", {}))
+        self._append_conversation_section(lines, results.get("conversations", {}))
+        self._append_recommendations(lines, results["overall"].get("recommendations", []))
 
-        # Summary
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("\n".join(lines), encoding="utf-8")
+        return output_path
+
+    def _append_summary(self, lines: list[str], results: dict[str, Any]) -> None:
         lines.append("## Executive Summary")
         lines.append("")
         summary = results["overall"]["summary"]
@@ -626,134 +673,149 @@ class PerformanceEvaluator:
         lines.append(f"- **Playbook Iteration:** {summary['playbook_iteration']}")
         lines.append("")
 
-        # SQLite Database
+    def _append_sqlite_section(self, lines: list[str], sqlite: dict[str, Any]) -> None:
         lines.append("## 1. SQLite Conversation History Database")
         lines.append("")
-        sqlite = results.get("sqlite_db", {})
-        if sqlite.get("status") == "healthy":
-            lines.append(f"[OK] **Status:** {sqlite['status']}")
-            lines.append(f"- Total Sessions: {sqlite['total_sessions']}")
-            lines.append(f"- Total Messages: {sqlite['total_messages']}")
-            lines.append(f"- Avg Messages/Session: {sqlite['avg_messages_per_session']}")
+        status = sqlite.get("status")
+        if status == "healthy":
+            lines.append(f"[OK] **Status:** {status}")
+            lines.append(f"- Total Sessions: {sqlite.get('total_sessions', 0)}")
+            lines.append(f"- Total Messages: {sqlite.get('total_messages', 0)}")
+            lines.append(f"- Avg Messages/Session: {sqlite.get('avg_messages_per_session', 0)}")
             if sqlite.get("sessions_by_mode"):
                 lines.append(f"- Sessions by Mode: {sqlite['sessions_by_mode']}")
             if sqlite.get("sessions_by_course"):
                 lines.append(f"- Sessions by Course: {sqlite['sessions_by_course']}")
         else:
-            lines.append(f"[ERROR] **Status:** {sqlite.get('status', 'unknown')}")
+            lines.append(f"[ERROR] **Status:** {status or 'unknown'}")
             if "error" in sqlite:
                 lines.append(f"- Error: {sqlite['error']}")
         lines.append("")
 
-        # Vector Store
+    def _append_vector_section(self, lines: list[str], vector: dict[str, Any]) -> None:
         lines.append("## 2. Chroma Vector Store")
         lines.append("")
-        vector = results.get("vector_store", {})
-        if vector.get("status") == "healthy":
-            lines.append(f"[OK] **Status:** {vector['status']}")
-            lines.append(f"- Collection: {vector['collection_name']}")
-            lines.append(f"- Document Count: {vector['document_count']}")
-        elif vector.get("status") == "collection_not_found":
-            lines.append(f"[WARNING] **Status:** {vector['status']}")
+        status = vector.get("status")
+        if status == "healthy":
+            lines.append(f"[OK] **Status:** {status}")
+            lines.append(f"- Collection: {vector.get('collection_name', 'unknown')}")
+            lines.append(f"- Document Count: {vector.get('document_count', 0)}")
+        elif status == "collection_not_found":
+            lines.append(f"[WARNING] **Status:** {status}")
             lines.append(f"- Available Collections: {vector.get('available_collections', [])}")
         else:
-            lines.append(f"[ERROR] **Status:** {vector.get('status', 'unknown')}")
+            lines.append(f"[ERROR] **Status:** {status or 'unknown'}")
             if "error" in vector:
                 lines.append(f"- Error: {vector['error']}")
         lines.append("")
 
-        # Playbook
+    def _append_playbook_section(self, lines: list[str], playbook: dict[str, Any]) -> None:
         lines.append("## 3. ACE Playbook Performance")
         lines.append("")
-        playbook = results.get("playbook", {})
-        if playbook.get("status") == "loaded":
-            lines.append(f"[OK] **Status:** {playbook['status']}")
-            lines.append(f"- Version: {playbook['version']}")
-            lines.append(f"- Iteration: {playbook['iteration']}")
-            lines.append(f"- Convergence Status: **{playbook['convergence_status']}**")
-            lines.append("")
-            lines.append("### Performance Metrics")
-            perf = playbook.get("performance_metrics", {})
-            lines.append(f"- Accuracy: {perf.get('accuracy', 0.0):.3f}")
-            lines.append(f"- BLEU Score: {perf.get('bleu_score', 0.0):.4f}")
-            lines.append(f"- ROUGE Score: {perf.get('rouge_score', 0.0):.4f}")
-            lines.append(f"- Semantic Similarity: {perf.get('semantic_similarity', 0.0):.4f}")
-            lines.append(f"- Avg Tokens: {perf.get('avg_tokens', 0.0)}")
-            lines.append(f"- Inference Time: {perf.get('inference_time_sec', 0.0):.2f}s")
-            lines.append("")
-            content = playbook.get("content_stats", {})
-            lines.append("### Content Statistics")
-            lines.append(f"- Heuristics: {content.get('heuristics_count', 0)}")
-            lines.append(f"- Examples: {content.get('examples_count', 0)}")
-            lines.append(f"- History Entries: {content.get('history_entries', 0)}")
-            lines.append("")
-            
-            # Heuristic Usage Analysis
-            heuristic_usage = playbook.get("heuristic_usage", {})
-            if heuristic_usage.get("status") != "no_logs":
-                lines.append("### Heuristic Usage Analysis")
-                lines.append(f"- Total Turns Analyzed: {heuristic_usage.get('total_turns_analyzed', 0)}")
-                lines.append(f"- Heuristics with Usage: {heuristic_usage.get('heuristics_with_usage', 0)}/{heuristic_usage.get('total_heuristics', 0)}")
-                lines.append("")
-                heuristic_stats = heuristic_usage.get("heuristic_stats", [])
-                if heuristic_stats:
-                    lines.append("Heuristic Usage Details:")
-                    for stat in heuristic_stats:
-                        lines.append(f"- **{stat['id']}**: {stat['usage_count']} uses ({stat['usage_percentage']}%)")
-        else:
+        if playbook.get("status") != "loaded":
             lines.append(f"[ERROR] **Status:** {playbook.get('status', 'unknown')}")
             if "error" in playbook:
                 lines.append(f"- Error: {playbook['error']}")
+            lines.append("")
+            return
+        lines.append(f"[OK] **Status:** {playbook['status']}")
+        lines.append(f"- Version: {playbook.get('version', 'unknown')}")
+        lines.append(f"- Iteration: {playbook.get('iteration', 0)}")
+        lines.append(f"- Convergence Status: **{playbook.get('convergence_status', 'unknown')}**")
+        lines.append("")
+        self._append_playbook_metrics(lines, playbook)
+        self._append_heuristic_usage(lines, playbook.get("heuristic_usage", {}))
         lines.append("")
 
-        # Conversations
+    @staticmethod
+    def _append_playbook_metrics(lines: list[str], playbook: dict[str, Any]) -> None:
+        lines.append("### Performance Metrics")
+        perf = playbook.get("performance_metrics", {})
+        lines.append(f"- Accuracy: {perf.get('accuracy', 0.0):.3f}")
+        lines.append(f"- BLEU Score: {perf.get('bleu_score', 0.0):.4f}")
+        lines.append(f"- ROUGE Score: {perf.get('rouge_score', 0.0):.4f}")
+        lines.append(f"- Semantic Similarity: {perf.get('semantic_similarity', 0.0):.4f}")
+        lines.append(f"- Avg Tokens: {perf.get('avg_tokens', 0.0)}")
+        lines.append(f"- Inference Time: {perf.get('inference_time_sec', 0.0):.2f}s")
+        lines.append("")
+        lines.append("### Content Statistics")
+        content = playbook.get("content_stats", {})
+        lines.append(f"- Heuristics: {content.get('heuristics_count', 0)}")
+        lines.append(f"- Examples: {content.get('examples_count', 0)}")
+        lines.append(f"- History Entries: {content.get('history_entries', 0)}")
+
+    @staticmethod
+    def _append_heuristic_usage(lines: list[str], heuristic_usage: dict[str, Any]) -> None:
+        if heuristic_usage.get("status") == "no_logs":
+            return
+        lines.append("")
+        lines.append("### Heuristic Usage Analysis")
+        lines.append(f"- Total Turns Analyzed: {heuristic_usage.get('total_turns_analyzed', 0)}")
+        lines.append(
+            f"- Heuristics with Usage: {heuristic_usage.get('heuristics_with_usage', 0)}/"
+            f"{heuristic_usage.get('total_heuristics', 0)}"
+        )
+        stats = heuristic_usage.get("heuristic_stats", [])
+        if stats:
+            lines.append("")
+            lines.append("Heuristic Usage Details:")
+            for stat in stats:
+                lines.append(f"- **{stat['id']}**: {stat['usage_count']} uses ({stat['usage_percentage']}%)")
+
+    def _append_conversation_section(self, lines: list[str], conv: dict[str, Any]) -> None:
         lines.append("## 4. Agent Success Metrics (Conversation Logs)")
         lines.append("")
-        conv = results.get("conversations", {})
-        if conv.get("status") == "analyzed":
-            lines.append(f"[OK] **Status:** {conv['status']}")
-            lines.append(f"- Total Turns: {conv['total_turns']}")
-            lines.append(f"- Unique Sessions: {conv['unique_sessions']}")
-            lines.append(f"- Avg Turns/Session: {conv.get('avg_turns_per_session', 0.0)}")
-            lines.append("")
-            lines.append("### Answer Quality")
-            aq = conv.get("answer_quality", {})
-            lines.append(f"- Avg Answer Length: {aq.get('avg_answer_length', 0.0):.0f} chars")
-            lines.append(f"- Answer/Question Ratio: {aq.get('answer_to_question_ratio', 0.0):.2f}")
-            lines.append("")
-            lines.append("### Retrieval Quality")
-            rq = conv.get("retrieval_quality", {})
-            lines.append(f"- Source Coverage Rate: {rq.get('source_coverage_rate', 0.0):.1%}")
-            lines.append(f"- Avg Sources/Turn: {rq.get('avg_sources_per_turn', 0.0):.2f}")
-            lines.append("")
-            lines.append("### Usage Patterns")
-            up = conv.get("usage_patterns", {})
-            if up.get("modes_used"):
-                lines.append(f"- Modes Used: {up['modes_used']}")
-            if up.get("courses_covered"):
-                lines.append(f"- Courses Covered: {up['courses_covered']}")
-        else:
+        if conv.get("status") != "analyzed":
             lines.append(f"[ERROR] **Status:** {conv.get('status', 'unknown')}")
+            lines.append("")
+            return
+        lines.append(f"[OK] **Status:** {conv['status']}")
+        lines.append(f"- Total Turns: {conv.get('total_turns', 0)}")
+        lines.append(f"- Unique Sessions: {conv.get('unique_sessions', 0)}")
+        lines.append(f"- Avg Turns/Session: {conv.get('avg_turns_per_session', 0.0)}")
+        lines.append("")
+        self._append_answer_quality(lines, conv.get("answer_quality", {}))
+        self._append_retrieval_quality(lines, conv.get("retrieval_quality", {}))
+        self._append_usage_patterns(lines, conv.get("usage_patterns", {}))
         lines.append("")
 
-        # Recommendations
+    @staticmethod
+    def _append_answer_quality(lines: list[str], answer_quality: dict[str, Any]) -> None:
+        lines.append("### Answer Quality")
+        lines.append(f"- Avg Answer Length: {answer_quality.get('avg_answer_length', 0.0):.0f} chars")
+        lines.append(f"- Answer/Question Ratio: {answer_quality.get('answer_to_question_ratio', 0.0):.2f}")
+        lines.append("")
+
+    @staticmethod
+    def _append_retrieval_quality(lines: list[str], retrieval_quality: dict[str, Any]) -> None:
+        lines.append("### Retrieval Quality")
+        lines.append(f"- Source Coverage Rate: {retrieval_quality.get('source_coverage_rate', 0.0):.1%}")
+        lines.append(f"- Avg Sources/Turn: {retrieval_quality.get('avg_sources_per_turn', 0.0):.2f}")
+        lines.append("")
+
+    @staticmethod
+    def _append_usage_patterns(lines: list[str], usage_patterns: dict[str, Any]) -> None:
+        lines.append("### Usage Patterns")
+        modes = usage_patterns.get("modes_used")
+        courses = usage_patterns.get("courses_covered")
+        if modes:
+            lines.append(f"- Modes Used: {modes}")
+        if courses:
+            lines.append(f"- Courses Covered: {courses}")
+
+    @staticmethod
+    def _append_recommendations(lines: list[str], recommendations: list[str]) -> None:
         lines.append("## 5. Recommendations")
         lines.append("")
-        recommendations = results["overall"].get("recommendations", [])
         if recommendations:
-            for i, rec in enumerate(recommendations, 1):
-                lines.append(f"{i}. {rec}")
+            for idx, rec in enumerate(recommendations, 1):
+                lines.append(f"{idx}. {rec}")
         else:
             lines.append("[OK] No issues detected. System is operating normally.")
         lines.append("")
 
-        # Write report
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text("\n".join(lines), encoding="utf-8")
-        return output_path
 
-
-def main() -> None:
+def main() -> None:  # noqa: C901
     """Main entry point."""
     import argparse
 
@@ -827,7 +889,7 @@ def main() -> None:
     print("=" * 60)
     print(f"Overall Health Status: {results['overall']['health_status'].upper()}")
     print("=" * 60)
-    
+
     # Handle --fix flag
     if args.fix:
         print("")
@@ -835,9 +897,9 @@ def main() -> None:
         print("AUTOMATED FIX SUGGESTIONS")
         print("=" * 60)
         print("")
-        
+
         fixes_applied = False
-        
+
         # Check ChromaDB corruption
         vector_status = results.get("vector_store", {}).get("status", "unknown")
         if vector_status in ("corrupted_or_incompatible", "error"):
@@ -851,6 +913,7 @@ def main() -> None:
             if response == "y":
                 try:
                     from genai_companion_with_ace.cli import reset_vector_store
+
                     reset_vector_store(config_path, force=False)
                     fixes_applied = True
                     print("[OK] Vector store reset initiated")
@@ -858,7 +921,7 @@ def main() -> None:
                     print(f"[ERROR] Failed to reset vector store: {e}")
                     print("  Please run manually: genai-companion reset-vector-store")
             print("")
-        
+
         # Check playbook convergence
         playbook_status = results.get("playbook", {}).get("status", "unknown")
         convergence = results.get("playbook", {}).get("convergence_status", "unknown")
@@ -872,6 +935,7 @@ def main() -> None:
             if response == "y":
                 try:
                     from genai_companion_with_ace.cli import trigger_ace
+
                     trigger_ace(config_path, iterations=None)
                     fixes_applied = True
                     print("[OK] ACE cycles triggered")
@@ -879,7 +943,7 @@ def main() -> None:
                     print(f"[ERROR] Failed to trigger ACE cycles: {e}")
                     print("  Please run manually: genai-companion trigger-ace")
             print("")
-        
+
         # Check for no conversation logs
         conv_status = results.get("conversations", {}).get("status", "unknown")
         if conv_status == "no_logs":
@@ -887,7 +951,7 @@ def main() -> None:
             print("  The agent has not been used yet, so ACE cycles cannot run.")
             print("  Start using the companion to generate conversation logs.")
             print("")
-        
+
         if not fixes_applied:
             print("[OK] No automated fixes were applied")
             print("  Review the recommendations in the report above for manual fixes.")
@@ -898,4 +962,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

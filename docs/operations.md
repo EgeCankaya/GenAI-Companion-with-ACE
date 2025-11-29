@@ -42,4 +42,3 @@ The evaluator reuses the normal retrieval + answer generation stack, so any conf
 - **ACE auto-trigger cadence** – conversation turn counts are cached on disk so automatic ACE runs resume exactly at the configured threshold even after restarts. Inspect the state file at `outputs/ace_playbooks/.ace_trigger_state.json` if needed.
 - **Large conversation logs** – JSONL files rotate once they exceed ~5 MB (suffix `session-id.<timestamp>.jsonl`). This keeps ACE exports fast without changing the log format.
 - **Attachments rejected** – ingestion now enforces an extension whitelist and a configurable max file size (`ingestion.max_file_size_mb`). Adjust it if you routinely feed large PDFs, otherwise the CLI will explain why a file was skipped.
-

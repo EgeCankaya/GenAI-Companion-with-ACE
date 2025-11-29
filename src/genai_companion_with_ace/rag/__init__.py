@@ -35,4 +35,3 @@ __all__ = [
     "infer_metadata_from_path",
     "load_processed_document",
 ]
-

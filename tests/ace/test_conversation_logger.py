@@ -96,4 +96,3 @@ def test_log_rotation(tmp_path: Path) -> None:
 
     rotated_files = [path for path in tmp_path.glob("session-rotate*.jsonl") if path.name != "session-rotate.jsonl"]
     assert rotated_files, "Expected rotation to create archived log files."
-

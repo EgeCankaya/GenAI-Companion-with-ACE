@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import logging
-import shutil
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
-
-from typing import TYPE_CHECKING
+from packaging.version import InvalidVersion, Version
 
 if TYPE_CHECKING:  # pragma: no cover
     from genai_companion_with_ace.config import CompanionConfig
@@ -43,10 +43,10 @@ class PlaybookContext:
                 if assistant:
                     segments.append(f"Assistant: {assistant}")
         return "\n".join(segments)
-    
+
     def get_heuristic_ids(self) -> list[str]:
         """Get list of heuristic IDs that are currently active."""
-        return self.heuristic_ids if self.heuristic_ids else [f"h{i+1:03d}" for i in range(len(self.heuristics))]
+        return self.heuristic_ids if self.heuristic_ids else [f"h{i + 1:03d}" for i in range(len(self.heuristics))]
 
 
 class PlaybookLoader:
@@ -64,7 +64,7 @@ class PlaybookLoader:
 
     def load_latest(self) -> PlaybookContext:
         """Load the most recent playbook from the project's playbook directory.
-        
+
         Priority order:
         1. ACE-generated playbooks (playbook_*.yaml) - most recent first
         2. default_playbook.yaml if it exists
@@ -83,12 +83,12 @@ class PlaybookLoader:
     def _parse_playbook(self, path: Path) -> PlaybookContext:
         payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         context = payload.get("context", {})
-        
+
         # Extract heuristics - they can be either strings or dicts with id/rule
         raw_heuristics = context.get("heuristics", [])
         heuristic_rules: list[str] = []
         heuristic_ids: list[str] = []
-        
+
         for heuristic in raw_heuristics:
             if isinstance(heuristic, dict):
                 # Extract rule and ID from dict format
@@ -103,7 +103,7 @@ class PlaybookLoader:
                 heuristic_rules.append(heuristic)
                 # Generate ID based on index
                 heuristic_ids.append(f"h{len(heuristic_rules):03d}")
-        
+
         return PlaybookContext(
             version=str(payload.get("version", path.stem)),
             system_instructions=context.get(
@@ -117,7 +117,7 @@ class PlaybookLoader:
 
     def list_available(self) -> list[Path]:
         """List all available playbooks in the project directory, sorted by modification time.
-        
+
         Includes both ACE-generated playbooks (playbook_*.yaml) and the default playbook.
         """
         playbooks = list(self._playbook_dir.glob("playbook_*.yaml"))
@@ -125,7 +125,40 @@ class PlaybookLoader:
         default_playbook = self._playbook_dir / "default_playbook.yaml"
         if default_playbook.exists() and default_playbook not in playbooks:
             playbooks.append(default_playbook)
-        return sorted(playbooks, key=lambda path: path.stat().st_mtime)
+        return sorted(playbooks, key=self._playbook_sort_key)
+
+    def _playbook_sort_key(self, path: Path) -> tuple[Version, float, str]:
+        """Sort by semantic version (fallback to mtime) so newest playbook wins."""
+        version = self._resolve_playbook_version(path)
+        return (version, path.stat().st_mtime, path.name)
+
+    def _resolve_playbook_version(self, path: Path) -> Version:
+        version_candidates = [
+            self._read_version_from_file(path),
+            self._extract_version_from_name(path.name),
+        ]
+        for candidate in version_candidates:
+            if not candidate:
+                continue
+            try:
+                return Version(str(candidate))
+            except InvalidVersion:
+                continue
+        return Version("0")
+
+    @staticmethod
+    def _extract_version_from_name(filename: str) -> str | None:
+        match = re.search(r"playbook_v([0-9][\w\.\-]*)", filename, re.IGNORECASE)
+        return match.group(1) if match else None
+
+    @staticmethod
+    def _read_version_from_file(path: Path) -> str | None:
+        try:
+            payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except Exception:  # pragma: no cover - corrupted or unreadable playbook
+            return None
+        raw_version = payload.get("version")
+        return str(raw_version) if raw_version else None
 
     def _get_default_playbook(self) -> PlaybookContext:
         """Return a default playbook tailored for the GenAI Companion project."""
@@ -224,13 +257,13 @@ class PlaybookLoader:
     @classmethod
     def from_config(cls, config_path: Path) -> PlaybookLoader:
         """Create a PlaybookLoader from configuration file.
-        
+
         Playbooks are now self-contained within this project in the outputs/ace_playbooks directory.
         """
         config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
         ace_config = config.get("ace", {}) if isinstance(config, dict) else {}
         playbook_dir = Path(ace_config.get("playbook_output_dir", "outputs/ace_playbooks"))
-        
+
         # Optional: Check for a default playbook in the project (not external repo)
         default_path = None
         default_playbook = playbook_dir / "default_playbook.yaml"
@@ -240,10 +273,9 @@ class PlaybookLoader:
         return cls(playbook_dir=playbook_dir, default_path=default_path)
 
     @classmethod
-    def from_companion_config(cls, config: "CompanionConfig") -> PlaybookLoader:
+    def from_companion_config(cls, config: CompanionConfig) -> PlaybookLoader:
         """Instantiate loader using a validated CompanionConfig."""
         playbook_dir = config.outputs.ace_playbooks
         default_playbook = playbook_dir / "default_playbook.yaml"
         default_path = default_playbook if default_playbook.exists() else None
         return cls(playbook_dir=playbook_dir, default_path=default_path)
-

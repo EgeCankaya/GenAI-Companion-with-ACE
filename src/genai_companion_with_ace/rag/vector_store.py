@@ -10,6 +10,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
+from chromadb.config import Settings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
@@ -97,21 +98,20 @@ class VectorStoreManager:
 
     def check_health(self) -> tuple[bool, str | None]:
         """Check if the vector store is healthy and accessible.
-        
+
         Returns:
             Tuple of (is_healthy, error_message). If healthy, error_message is None.
         """
         try:
             store = self._ensure_store()
-            # Try a simple operation to verify the store works
             _ = store.get()  # This will fail if corrupted
-            return True, None
         except Exception as e:
             error_msg = str(e)
-            # Check for common corruption indicators
             if "panic" in error_msg.lower() or "out of range" in error_msg.lower():
                 return False, f"Vector store appears corrupted: {error_msg[:200]}"
             return False, f"Vector store health check failed: {error_msg[:200]}"
+        else:
+            return True, None
 
     def metadata_filter(self, document: Document) -> Document:
         """Retain only relevant metadata fields."""
@@ -131,10 +131,17 @@ class VectorStoreManager:
                 self._config.collection_name,
                 self._config.persist_directory,
             )
+            client_settings = Settings(
+                chroma_api_impl="chromadb.api.segment.SegmentAPI",
+                anonymized_telemetry=False,
+                allow_reset=True,
+                persist_directory=str(self._config.persist_directory),
+            )
             self._store = Chroma(
                 collection_name=self._config.collection_name,
                 persist_directory=str(self._config.persist_directory),
                 embedding_function=self._embeddings,
+                client_settings=client_settings,
             )
         return self._store
 
@@ -182,4 +189,3 @@ class VectorStoreManager:
                         except Exception as inner_exc:
                             LOGGER.debug("Failed removing %s: %s", item, inner_exc)
         persist_path.mkdir(parents=True, exist_ok=True)
-

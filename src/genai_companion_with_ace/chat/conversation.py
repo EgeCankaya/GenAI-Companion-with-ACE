@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from genai_companion_with_ace.utils.time import utcnow_isoformat
 
@@ -94,7 +95,9 @@ class SessionHistoryStore:
             )
             connection.commit()
         LOGGER.info("Created conversation session %s", session_id)
-        return ConversationSession(session_id=session_id, created_at=created_at, user_id=user_id, course=course, mode=mode)
+        return ConversationSession(
+            session_id=session_id, created_at=created_at, user_id=user_id, course=course, mode=mode
+        )
 
     def append_message(self, session_id: str, message: Message) -> None:
         with self._connection() as connection:
@@ -283,4 +286,3 @@ class ConversationManager:
         self._store.append_message(self._active_session, message)
         self._store.truncate_session(self._active_session, self._max_context_turns * 2)
         return message
-

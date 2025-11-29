@@ -37,4 +37,3 @@ def test_persistent_conversation_history(tmp_path: Path) -> None:
 
     new_manager.delete_session("session-1")
     assert not new_manager.list_sessions()
-

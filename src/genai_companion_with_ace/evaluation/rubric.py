@@ -52,14 +52,12 @@ class EvaluationRubric:
         contexts: list[str],
         golden_answer: str,
     ) -> dict[str, float]:
-        dataset = Dataset.from_dict(
-            {
-                "question": [question],
-                "answer": [answer],
-                "contexts": [contexts],
-                "ground_truth": [golden_answer],
-            }
-        )
+        dataset = Dataset.from_dict({
+            "question": [question],
+            "answer": [answer],
+            "contexts": [contexts],
+            "ground_truth": [golden_answer],
+        })
         metrics = [
             AnswerRelevancy(),
             AnswerCorrectness(),
@@ -72,6 +70,7 @@ class EvaluationRubric:
 
     def _simple_overlap(self, question: str, answer: str, golden_answer: str) -> dict[str, float]:
         """Fallback scoring based on keyword overlap."""
+
         def _score(reference: str, candidate: str) -> float:
             ref_tokens = set(reference.lower().split())
             cand_tokens = set(candidate.lower().split())
@@ -87,4 +86,3 @@ class EvaluationRubric:
             "context_relevancy": relevancy,
             "faithfulness": correctness,
         }
-

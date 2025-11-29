@@ -17,8 +17,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 class RunnerProtocol(Protocol):
-    def run(self, dataset: list[dict], iterations: int, playbook_output_dir: Path) -> Path | None:
-        ...
+    def run(self, dataset: list[dict], iterations: int, playbook_output_dir: Path) -> Path | None: ...
 
 
 @dataclass(slots=True)
@@ -28,6 +27,11 @@ class ACETriggerConfig:
     config_path: Path | None = None
     iterations: int = 1
     trigger_threshold: int = 50
+
+
+class PlaybookSerializationError(RuntimeError):
+    def __init__(self, raw_type: type) -> None:
+        super().__init__(f"Unsupported playbook result type: {raw_type!r}")
 
 
 class ACERunnerAdapter:
@@ -102,7 +106,7 @@ class ACERunnerAdapter:
             ace_playbook_path.parent.mkdir(parents=True, exist_ok=True)
             raw_playbook.to_yaml(str(ace_playbook_path))
         else:
-            raise TypeError(f"Unsupported playbook result type: {type(raw_playbook)!r}")
+            raise PlaybookSerializationError(type(raw_playbook))
 
         if not ace_playbook_path.is_absolute():
             ace_playbook_path = self._repo_path / ace_playbook_path
@@ -127,7 +131,7 @@ def run_ace_cycles(
     runner: RunnerProtocol | None = None,
 ) -> PlaybookContext:
     """Execute ACE improvement cycles and reload the resulting playbook.
-    
+
     Generated playbooks are stored in the project's outputs/ace_playbooks directory,
     making them self-contained within this project.
     """
@@ -138,12 +142,10 @@ def run_ace_cycles(
 
     LOGGER.info("Running ACE cycles with %s conversation turns", len(dataset))
     runner = runner or ACERunnerAdapter(trigger_config)
-    
+
     # Pass the playbook output directory to ensure playbooks are stored locally
     new_playbook = runner.run(
-        dataset, 
-        iterations=trigger_config.iterations,
-        playbook_output_dir=trigger_config.playbook_output_dir
+        dataset, iterations=trigger_config.iterations, playbook_output_dir=trigger_config.playbook_output_dir
     )
 
     if new_playbook:
@@ -162,4 +164,3 @@ def _in_directory(path: Path):
         yield
     finally:
         os.chdir(old_cwd)
-

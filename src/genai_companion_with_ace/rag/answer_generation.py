@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
-import json
 
 import requests
 
@@ -84,9 +85,7 @@ class AnswerGenerator:
         self._playbook_loader = playbook_loader
         self._trigger_config = trigger_config
         self._trigger_state_path = (
-            trigger_config.playbook_output_dir / ".ace_trigger_state.json"
-            if trigger_config
-            else None
+            trigger_config.playbook_output_dir / ".ace_trigger_state.json" if trigger_config else None
         )
         self._last_trigger_count = self._load_trigger_state()
         self._last_retrieval: RetrievalResult | None = None
@@ -229,80 +228,17 @@ class AnswerGenerator:
                 temperature=params.temperature,
                 max_tokens=params.max_tokens,
             )
-            if detail_requested and outline_context.sections:
-                missing_sections = self._missing_outline_sections(answer, outline_context.sections)
-                if missing_sections:
-                    answer = self._continue_outline_sections(
-                        answer,
-                        processed_query,
-                        missing_sections,
-                        temperature=temperature,
-                        max_tokens=max(256, params.max_tokens // 2),
-                    )
         except requests.exceptions.ConnectionError as exc:
-            if "localhost:11434" in str(exc) or "11434" in str(exc):
-                message = (
-                    "❌ Ollama is not running!\n\n"
-                    "Please start Ollama before using the companion:\n"
-                    "  1. Open a terminal and run: ollama serve\n"
-                    "  2. Or start Ollama from your applications\n"
-                    "  3. Verify it's running: ollama list\n\n"
-                    "For more information, visit: https://ollama.com/"
-                )
-            else:
-                message = f"Failed to connect to LLM service: {exc}"
-            raise GenerationError(message) from exc
+            raise GenerationError(self._connection_error_message(exc)) from exc
         except Exception as exc:  # pragma: no cover - LLM errors
-            error_str = str(exc)
-            # Check for 404 errors (model not found)
-            if "404" in error_str or "not found" in error_str.lower():
-                # Try to extract model name from error or config
-                model_hint = "llama3.1:8b"  # default
-                if "pull" in error_str:
-                    # Extract model name from error message like "ollama pull llama3.1:8b"
-                    import re
-                    match = re.search(r"pull\s+([^\s`]+)", error_str)
-                    if match:
-                        model_hint = match.group(1)
-                
-                message = (
-                    f"❌ Model not found!\n\n"
-                    f"The required model is not installed in Ollama.\n\n"
-                    f"To install the model:\n"
-                    f"  Run: ollama pull {model_hint}\n\n"
-                    f"This will download the model (may take several minutes).\n"
-                    f"After installation, try your question again.\n\n"
-                    f"To see installed models: ollama list"
-                )
-            else:
-                message = f"Failed to generate answer: {exc}"
-            raise GenerationError(message) from exc
-        except Exception as exc:  # pragma: no cover - LLM errors
-            error_str = str(exc)
-            # Check for 404 errors (model not found)
-            if "404" in error_str or "not found" in error_str.lower():
-                # Try to extract model name from error or config
-                model_hint = "llama3.1:8b"  # default
-                if "pull" in error_str:
-                    # Extract model name from error message like "ollama pull llama3.1:8b"
-                    import re
-                    match = re.search(r"pull\s+([^\s`]+)", error_str)
-                    if match:
-                        model_hint = match.group(1)
-                
-                message = (
-                    f"❌ Model not found!\n\n"
-                    f"The required model is not installed in Ollama.\n\n"
-                    f"To install the model:\n"
-                    f"  Run: ollama pull {model_hint}\n\n"
-                    f"This will download the model (may take several minutes).\n"
-                    f"After installation, try your question again.\n\n"
-                    f"To see installed models: ollama list"
-                )
-            else:
-                message = f"Failed to generate answer: {exc}"
-            raise GenerationError(message) from exc
-        return answer
+            raise GenerationError(self._llm_error_message(exc)) from exc
+        return self._continue_outline_if_needed(
+            answer,
+            processed_query,
+            outline_context,
+            params,
+            detail_requested,
+        )
 
     def _check_and_trigger_ace_cycles(self) -> None:
         """Check if threshold is reached and automatically trigger ACE cycles if needed."""
@@ -369,9 +305,7 @@ class AnswerGenerator:
             module = metadata.get("module")
             qualifier = f" (Course {course} - {module})" if course and module else ""
             preview = chunk.document.page_content.replace("\n", " ")[:160]
-            lines.append(
-                f"{idx}. [{chunk.source}] score={chunk.score:.2f} source={source}{qualifier}"
-            )
+            lines.append(f"{idx}. [{chunk.source}] score={chunk.score:.2f} source={source}{qualifier}")
             lines.append(f"    {preview}...")
         return lines
 
@@ -443,14 +377,10 @@ class AnswerGenerator:
 
         lines: list[str] = ["Retrieved context:"]
         max_chunks = self._config.citation_top_k * (2 if detail_requested else 1)
-        for index, chunk in enumerate(retrieval_result.combined[: max_chunks], start=1):
+        for index, chunk in enumerate(retrieval_result.combined[:max_chunks], start=1):
             metadata = chunk.document.metadata
             source = metadata.get("source") or metadata.get("course") or "Unknown Source"
-            lines.append(
-                f"[{index}] Source: {source}\n"
-                f"Content: {chunk.document.page_content}\n"
-                f"Metadata: {metadata}"
-            )
+            lines.append(f"[{index}] Source: {source}\nContent: {chunk.document.page_content}\nMetadata: {metadata}")
         return "\n".join(lines)
 
     def _build_citations(self, retrieval_result: RetrievalResult) -> list[Citation]:
@@ -465,7 +395,8 @@ class AnswerGenerator:
             citations.append(
                 Citation(
                     source=source_label,
-                    snippet=chunk.document.page_content[:200] + ("..." if len(chunk.document.page_content) > 200 else ""),
+                    snippet=chunk.document.page_content[:200]
+                    + ("..." if len(chunk.document.page_content) > 200 else ""),
                     metadata=metadata,
                 )
             )
@@ -494,7 +425,10 @@ class AnswerGenerator:
             "Maintain the established tone, cite sources inline, and avoid repeating completed sections.\n\n"
             f"Question: {processed_query.user_message.content}\n\n"
             "Remaining sections:\n"
-            + "\n".join(f"- {section.title}: {', '.join(section.bullets) or 'Use best judgment'}" for section in missing_sections)
+            + "\n".join(
+                f"- {section.title}: {', '.join(section.bullets) or 'Use best judgment'}"
+                for section in missing_sections
+            )
             + "\n\nDo not restate the introduction. Append the new sections so they flow naturally after the existing answer."
         )
         llm_client = self._select_llm(True)
@@ -504,6 +438,27 @@ class AnswerGenerator:
             max_tokens=max(256, max_tokens),
         )
         return answer.rstrip() + "\n\n" + continuation.strip()
+
+    def _continue_outline_if_needed(
+        self,
+        answer: str,
+        processed_query: ProcessedQuery,
+        outline_context: OutlineContext,
+        params: GenerationParams,
+        detail_requested: bool,
+    ) -> str:
+        if not detail_requested or not outline_context.sections:
+            return answer
+        missing_sections = self._missing_outline_sections(answer, outline_context.sections)
+        if not missing_sections:
+            return answer
+        return self._continue_outline_sections(
+            answer,
+            processed_query,
+            missing_sections,
+            temperature=params.temperature,
+            max_tokens=max(256, params.max_tokens // 2),
+        )
 
     def _select_llm(self, detail_requested: bool):
         if detail_requested and self._deep_llm_client:
@@ -518,7 +473,7 @@ class AnswerGenerator:
 
     def _summarize_retrieval_for_outline(self, retrieval_result: RetrievalResult, max_points: int = 8) -> list[str]:
         points: list[str] = []
-        for chunk in retrieval_result.combined[: max_points]:
+        for chunk in retrieval_result.combined[:max_points]:
             metadata = chunk.document.metadata
             source = metadata.get("source") or metadata.get("module") or "Course material"
             snippet = chunk.document.page_content.strip().replace("\n", " ")
@@ -537,11 +492,10 @@ class AnswerGenerator:
             "Requirements:\n"
             f"- Provide {target_sections} sections (overview, key techniques, comparisons, code walkthrough, pitfalls, FAQs, summary, next steps, etc.).\n"
             "- Each section must include a concise title and 2-3 bullet highlights referencing the key points.\n"
-            "- Respond ONLY with JSON matching: {\"sections\":[{\"title\":\"...\",\"bullets\":[\"...\"]}, ...]}.\n"
+            '- Respond ONLY with JSON matching: {"sections":[{"title":"...","bullets":["..."]}, ...]}.\n'
             "- Do not include markdown or explanations outside the JSON.\n\n"
             f"User question: {processed_query.user_message.content}\n\n"
-            "Key points from retrieved sources:\n"
-            + "\n".join(f"- {kp}" for kp in key_points)
+            "Key points from retrieved sources:\n" + "\n".join(f"- {kp}" for kp in key_points)
         )
         llm = self._select_llm(True)
         response = llm.generate(prompt, temperature=0.35, max_tokens=1024)
@@ -580,3 +534,39 @@ class AnswerGenerator:
                 lines.append(f"   - {bullet}")
         return "\n".join(lines)
 
+    @staticmethod
+    def _connection_error_message(exc: Exception) -> str:
+        error_text = str(exc)
+        if "localhost:11434" in error_text or "11434" in error_text:
+            return (
+                "❌ Ollama is not running!\n\n"
+                "Please start Ollama before using the companion:\n"
+                "  1. Open a terminal and run: ollama serve\n"
+                "  2. Or start Ollama from your applications\n"
+                "  3. Verify it's running: ollama list\n\n"
+                "For more information, visit: https://ollama.com/"
+            )
+        return f"Failed to connect to LLM service: {exc}"
+
+    def _llm_error_message(self, exc: Exception) -> str:
+        error_str = str(exc)
+        if "404" in error_str or "not found" in error_str.lower():
+            model_hint = self._model_hint_from_error(error_str)
+            return (
+                "❌ Model not found!\n\n"
+                "The required model is not installed in Ollama.\n\n"
+                "To install the model:\n"
+                f"  Run: ollama pull {model_hint}\n\n"
+                "This will download the model (may take several minutes).\n"
+                "After installation, try your question again.\n\n"
+                "To see installed models: ollama list"
+            )
+        return f"Failed to generate answer: {exc}"
+
+    @staticmethod
+    def _model_hint_from_error(error_str: str) -> str:
+        if "pull" in error_str:
+            match = re.search(r"pull\s+([^\s`]+)", error_str)
+            if match:
+                return match.group(1)
+        return "llama3.1:8b"

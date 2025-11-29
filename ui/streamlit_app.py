@@ -39,4 +39,3 @@ dataset_path = Path("data/eval/eval_questions_100.json")
 dataset = ensure_default_dataset(dataset_path)
 summary = dataset.summary()
 st.bar_chart(summary)
-

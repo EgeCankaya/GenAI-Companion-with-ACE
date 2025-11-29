@@ -56,4 +56,3 @@ def test_retrieval_combines_sources(tmp_path: Path) -> None:
     assert any(chunk.source.startswith("attachment") for chunk in result.attachment_chunks)
     assert any(chunk.source.startswith("dense") for chunk in result.dense_results)
     assert len(result.combined) <= orchestrator.config.hybrid_top_k
-

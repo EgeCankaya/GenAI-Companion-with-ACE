@@ -13,16 +13,17 @@ LOGGER = logging.getLogger(__name__)
 
 def _resolve_device(device: str | None) -> str:
     """Resolve device string to a valid PyTorch device.
-    
+
     Args:
         device: Device string, can be 'auto', 'cpu', 'cuda', etc.
-        
+
     Returns:
         Valid PyTorch device string (e.g., 'cpu' or 'cuda')
     """
     if device is None or device == "auto":
         try:
             import torch
+
             return "cuda" if torch.cuda.is_available() else "cpu"
         except ImportError:
             return "cpu"
@@ -107,4 +108,3 @@ class EmbeddingFactory:
             options["dimensions"] = self._config.dimensions
 
         return OpenAIEmbeddings(**options)
-

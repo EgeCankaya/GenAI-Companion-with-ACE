@@ -25,13 +25,23 @@ from genai_companion_with_ace.ace_integration import ACETriggerConfig, PlaybookL
 from genai_companion_with_ace.ace_integration.ace_trigger import ACERunnerAdapter  # noqa: E402
 from genai_companion_with_ace.config import CompanionConfig  # noqa: E402
 
-
 DEFAULT_CONFIG = Path("configs/companion_config.yaml")
 RUN_REPORT_DIR = Path("outputs/ace_runs")
 
 
 class DatasetLoadError(RuntimeError):
     """Raised when the ACE dataset file is missing or malformed."""
+
+
+class DatasetFileNotFound(DatasetLoadError):
+    def __init__(self, path: Path) -> None:
+        super().__init__(f"Dataset file not found: {path}")
+        self.path = path
+
+
+class InvalidDatasetError(DatasetLoadError):
+    def __init__(self) -> None:
+        super().__init__("Dataset must be a non-empty JSON array.")
 
 
 def parse_args() -> argparse.Namespace:
@@ -59,10 +69,10 @@ def parse_args() -> argparse.Namespace:
 
 def load_dataset(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
-        raise DatasetLoadError(f"Dataset file not found: {path}")
+        raise DatasetFileNotFound(path)
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, list) or not data:
-        raise DatasetLoadError("Dataset must be a non-empty JSON array")
+        raise InvalidDatasetError()
     return data
 
 
@@ -242,4 +252,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

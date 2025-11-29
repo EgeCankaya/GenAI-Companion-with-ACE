@@ -194,12 +194,10 @@ def test_deep_dive_outline_and_target_words(tmp_path: Path) -> None:
     retrieval = MagicMock()
     retrieval.retrieve.return_value = build_retrieval_result()
 
-    scripted_llm = ScriptedLLM(
-        [
-            '{"sections":[{"title":"Overview","bullets":["context","goal"]},{"title":"Techniques","bullets":["Adapters","LoRA"]}]}',
-            "Overview section content.\n\nTechniques section content.",
-        ]
-    )
+    scripted_llm = ScriptedLLM([
+        '{"sections":[{"title":"Overview","bullets":["context","goal"]},{"title":"Techniques","bullets":["Adapters","LoRA"]}]}',
+        "Overview section content.\n\nTechniques section content.",
+    ])
 
     generator = AnswerGenerator(
         llm_client=scripted_llm,
@@ -327,4 +325,3 @@ def test_automatic_ace_triggering(tmp_path: Path) -> None:
         mock_run_ace.assert_called_once()
         assert generator._playbook.version == "1.1.0"
         assert generator._last_trigger_count == 3
-

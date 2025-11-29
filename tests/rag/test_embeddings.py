@@ -60,4 +60,3 @@ def test_sentence_transformer_auto_device(monkeypatch: pytest.MonkeyPatch) -> No
     assert embeddings is dummy
     # Device "auto" should be resolved to "cpu" when CUDA is not available
     assert fake_ctor.kwargs["model_kwargs"]["device"] == "cpu"
-

@@ -47,4 +47,3 @@ MODE_REGISTRY: dict[ConversationMode, ModeSettings] = {
 def get_mode_settings(mode: ConversationMode) -> ModeSettings:
     """Return the settings for the requested conversation mode."""
     return MODE_REGISTRY[mode]
-
