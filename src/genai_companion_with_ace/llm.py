@@ -11,9 +11,10 @@ def check_ollama_connection(base_url: str = "http://localhost:11434", timeout: i
     """Check if Ollama is running and accessible."""
     try:
         response = requests.get(f"{base_url}/api/tags", timeout=timeout)
-        return response.status_code == 200
     except (OSError, requests.exceptions.ConnectionError, requests.exceptions.Timeout):
         return False
+    else:
+        return response.status_code == 200
 
 
 def check_ollama_model(base_url: str, model_name: str, timeout: int = 2) -> tuple[bool, list[str]]:
