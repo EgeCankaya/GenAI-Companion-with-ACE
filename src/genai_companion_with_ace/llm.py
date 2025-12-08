@@ -45,7 +45,9 @@ class LangChainLLMAdapter:
         self._current_max_tokens = settings.get("max_tokens", 4096)
         self.llm = self._initialize_llm()
 
-    def _initialize_llm(self, max_tokens: int | None = None) -> Any:  # pragma: no cover - depends on runtime environment
+    def _initialize_llm(
+        self, max_tokens: int | None = None
+    ) -> Any:  # pragma: no cover - depends on runtime environment
         max_tokens = max_tokens or self._current_max_tokens
         if self.provider == "ollama":
             from langchain_community.llms import Ollama

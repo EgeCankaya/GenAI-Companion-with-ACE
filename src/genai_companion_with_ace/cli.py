@@ -889,7 +889,7 @@ def evaluate_command(
         evaluation_dataset = EvaluationDataset(evaluation_dataset.examples[:limit])
     engine = EvaluationEngine(EvaluationRubric())
 
-    def answer_provider(example: Any) -> str:
+    def answer_provider(example: Any) -> dict[str, object]:
         session_id = f"eval-{example.id}"
         processed = runtime.query_processor.process(
             session_id=session_id,

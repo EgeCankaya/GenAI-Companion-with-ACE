@@ -267,7 +267,7 @@ class DocumentIngestionPipeline:
     @staticmethod
     def _load_docx(path: Path) -> str:
         try:
-            import docx  # type: ignore[import-untyped]
+            import docx
         except ImportError as exc:  # pragma: no cover
             message = "Install 'python-docx' to enable DOCX ingestion"
             raise RuntimeError(message) from exc

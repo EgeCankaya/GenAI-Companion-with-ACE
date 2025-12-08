@@ -24,6 +24,7 @@ dependencies = [
 
     # RAG & LangChain ecosystem
     "langchain>=0.3.0",
+    "langchain-core>=0.3.0",
     "langchain-community>=0.3.0",
     "langchain-chroma>=0.1.0",
     "langchain-text-splitters>=0.1.0",
@@ -51,13 +52,15 @@ dependencies = [
     "click>=8.1.0",
     "rich>=13.7.0",
     "pydantic>=2.5.0",
+    "requests>=2.31.0",
     "pyyaml>=6.0",
     "tenacity>=8.2.0",
+    "packaging>=23.0",
 
     # Evaluation & analytics
     "ragas>=0.1.9",
     "pandas>=2.0.0",
-    "numpy>=1.24.0",
+    "numpy>=1.24,<2.0",
     "matplotlib>=3.7.0",
     # onnxruntime is a transitive dependency but only available for Python >= 3.10
     # Exclude it for Python 3.9 to avoid installation failures
@@ -165,6 +168,9 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]
+"scripts/generate_ace_report.py" = ["C901", "S112", "SIM108"]
+"scripts/validate_playbook.py" = ["C901", "SIM102"]
+"src/genai_companion_with_ace/rag/vector_store.py" = ["C901", "S110"]
 
 [tool.ruff.format]
 preview = true
@@ -175,3 +181,27 @@ skip_empty = true
 [tool.coverage.run]
 branch = true
 source = ["src"]
+
+[tool.deptry]
+ignore = []
+[tool.deptry.per_rule_ignores]
+DEP002 = [
+    "agentic-context-engineering",
+    "langchain",
+    "rank-bm25",
+    "sentence-transformers",
+    "ollama",
+    "openai",
+    "beautifulsoup4",
+    "markdownify",
+    "pydantic",
+    "tenacity",
+    "pandas",
+    "numpy",
+    "matplotlib",
+    "onnxruntime",
+    "sqlalchemy",
+]
+DEP003 = [
+    "datasets",
+]

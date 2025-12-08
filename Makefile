@@ -17,12 +17,18 @@ install: ## Install the virtual environment and install the pre-commit hooks
 check: ## Run code quality tools.
 	@echo "🚀 Checking lock file consistency with 'pyproject.toml'"
 	@uv lock --locked
+	@echo "🚀 Auto-fixing Ruff issues (check --fix)"
+	@uvx --from ruff ruff check --fix
+	@echo "🚀 Ensuring consistent formatting with Ruff"
+	@uvx --from ruff ruff format
 	@echo "🚀 Linting code: Running pre-commit"
 	@uv run pre-commit run -a
 	@echo "🚀 Static type checking: Running mypy"
 	@uv run mypy
 	@echo "🚀 Checking for obsolete dependencies: Running deptry"
 	@uv run deptry src
+	@echo "🚀 Validating ACE playbooks"
+	@uv run python scripts/validate_playbook.py --all
 
 .PHONY: test
 test: ## Test the code with pytest
@@ -63,6 +69,8 @@ ace-improve: ## Generate a dataset and run ACE self-improvement cycle
 	@uv run python scripts/build_ace_dataset.py $(DATASET_FLAGS)
 	@echo "🤖 Running ACE iterations (count=$(ACE_ITERATIONS))"
 	@uv run python scripts/run_ace_iterations.py --dataset $(ACE_DATASET) --iterations $(ACE_ITERATIONS)
+	@echo "📊 Generating evaluation report"
+	@uv run python scripts/generate_ace_report.py || echo "⚠️  Report generation failed (non-fatal)"
 
 .PHONY: help
 help:

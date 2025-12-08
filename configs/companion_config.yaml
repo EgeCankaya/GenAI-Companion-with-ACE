@@ -62,8 +62,8 @@ ace:
   repository_path: ../Agentic-Context-Engineering
   playbook_output_dir: outputs/ace_playbooks
   config_path: ../Agentic-Context-Engineering/agentic_context_engineering/configs/default.yaml
-  trigger_threshold: 50
-  iterations: 1
+  trigger_threshold: 50  # Auto-trigger ACE every N conversation turns
+  iterations: 1  # Number of ACE iterations per run (increase if convergence is degraded)
 
 ingestion:
   chunk_size: 800

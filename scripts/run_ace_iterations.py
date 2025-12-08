@@ -86,7 +86,8 @@ def load_trigger_config(config_path: Path, iterations: int) -> tuple[ACETriggerC
     if config_path_value:
         raw_path = Path(config_path_value)
         if not raw_path.is_absolute():
-            raw_path = (config_path.parent / raw_path).resolve()
+            # Resolve relative to repo_path, not companion config parent
+            raw_path = (repo_path / raw_path).resolve()
         resolved_config_path = raw_path
 
     trigger_config = ACETriggerConfig(

@@ -4,20 +4,45 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from typing import Any
+
+Dataset: Any
+ragas_evaluate: Any
+AnswerCorrectness: Any
+AnswerRelevancy: Any
+ContextRelevance: Any
+Faithfulness: Any
 
 try:  # pragma: no cover - optional heavy dependency
-    from datasets import Dataset  # type: ignore[import-untyped]
-    from ragas import evaluate as ragas_evaluate
-    from ragas.metrics import AnswerCorrectness, AnswerRelevancy, ContextRelevance, Faithfulness  # ContextRelevance not ContextRelevancy
+    from datasets import Dataset as _Dataset  # type: ignore[import-untyped]
+    from ragas import evaluate as _ragas_evaluate
+    from ragas.metrics import (  # ContextRelevance not ContextRelevancy
+        AnswerCorrectness as _AnswerCorrectness,
+    )
+    from ragas.metrics import (
+        AnswerRelevancy as _AnswerRelevancy,
+    )
+    from ragas.metrics import (
+        ContextRelevance as _ContextRelevance,
+    )
+    from ragas.metrics import (
+        Faithfulness as _Faithfulness,
+    )
 
+    Dataset = _Dataset
+    ragas_evaluate = _ragas_evaluate
+    AnswerCorrectness = _AnswerCorrectness
+    AnswerRelevancy = _AnswerRelevancy
+    ContextRelevance = _ContextRelevance
+    Faithfulness = _Faithfulness
     _RAGAS_AVAILABLE = True
 except Exception:  # pragma: no cover
-    Dataset = None  # type: ignore[assignment,misc]
-    ragas_evaluate = None  # type: ignore[assignment,misc]
-    AnswerCorrectness = None  # type: ignore[assignment,misc]
-    AnswerRelevancy = None  # type: ignore[assignment,misc]
-    ContextRelevance = None  # type: ignore[assignment,misc]
-    Faithfulness = None  # type: ignore[assignment,misc]
+    Dataset = None
+    ragas_evaluate = None
+    AnswerCorrectness = None
+    AnswerRelevancy = None
+    ContextRelevance = None
+    Faithfulness = None
     _RAGAS_AVAILABLE = False
 
 LOGGER = logging.getLogger(__name__)
@@ -77,10 +102,12 @@ class EvaluationRubric:
                 metric_scores = result[metric_name]
                 if metric_scores and len(metric_scores) > 0:
                     scores[metric_name] = float(metric_scores[0])
-            elif hasattr(result, "results") and metric_name in result.results:  # type: ignore[attr-defined]
-                metric_scores = result.results[metric_name]  # type: ignore[attr-defined,index]
-                if metric_scores and len(metric_scores) > 0:
-                    scores[metric_name] = float(metric_scores[0])
+            else:
+                results_map = getattr(result, "results", None)
+                if isinstance(results_map, dict) and metric_name in results_map:
+                    metric_scores = results_map[metric_name]
+                    if metric_scores and len(metric_scores) > 0:
+                        scores[metric_name] = float(metric_scores[0])
         return scores
 
     def _simple_overlap(self, question: str, answer: str, golden_answer: str) -> dict[str, float]:

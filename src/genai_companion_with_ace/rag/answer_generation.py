@@ -72,7 +72,7 @@ class AnswerGenerator:
         playbook_loader: PlaybookLoader | None = None,
         trigger_config: ACETriggerConfig | None = None,
         config: GenerationConfig | None = None,
-        deep_dive_llm_client=None,
+        deep_dive_llm_client: Any | None = None,
     ) -> None:
         self._llm_client = llm_client
         self._deep_llm_client = deep_dive_llm_client
