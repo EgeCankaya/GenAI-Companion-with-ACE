@@ -5,7 +5,7 @@ description = "Gen AI Companion that utilizes ACE"
 authors = [{ name = "Egemen Çankaya", email = "egemencankaya14@gmail.com" }]
 readme = "README.md"
 keywords = ["python", "rag", "ace", "llm"]
-requires-python = ">=3.9,<4.0"
+requires-python = ">=3.10,<4.0"
 classifiers = [
     "Intended Audience :: Developers",
     "Programming Language :: Python",
@@ -62,13 +62,13 @@ dependencies = [
     "pandas>=2.0.0",
     "numpy>=1.24,<2.0",
     "matplotlib>=3.7.0",
+# Chroma pulls onnxruntime; keep a cp39-compatible floor and avoid 1.20+ (no cp39 wheels)
+"onnxruntime>=1.14,<1.15; python_version < '3.10'",
+"onnxruntime>=1.20.1; python_version >= '3.10'",
 
     # Persistence
     "sqlalchemy>=2.0.0",
 ]
-
-[project.optional-dependencies]
-onnx = ["onnxruntime>=1.20.1; python_version >= '3.10'"]
 
 [project.scripts]
 genai-companion = "genai_companion_with_ace.cli:cli"
