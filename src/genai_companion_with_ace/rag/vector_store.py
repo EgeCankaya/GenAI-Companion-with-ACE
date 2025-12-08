@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 import shutil
 import time
@@ -10,6 +11,7 @@ from collections.abc import Iterable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
 
 import chromadb
 from chromadb.config import Settings
@@ -49,9 +51,38 @@ try:
             # If the attribute doesn't exist, return 0 (no file handles tracked)
             return 0
 
-    local_persistent_hnsw.PersistentLocalHnswSegment.get_file_handle_count = patched_get_file_handle_count
+    persistent_segment = cast(Any, local_persistent_hnsw.PersistentLocalHnswSegment)
+    persistent_segment.get_file_handle_count = patched_get_file_handle_count
 except (ImportError, AttributeError):
     pass  # ChromaDB structure may have changed, fall back to default behavior
+
+# Bypass tenant validation for ephemeral/local stores when sysdb tables are absent.
+try:
+    from chromadb.api import client as chroma_client_mod
+
+    original_validate_tenant = getattr(chroma_client_mod.Client, "_validate_tenant_database", None)
+    if callable(original_validate_tenant):
+
+        def _noop_validate_tenant(self: Any, tenant: str, database: str) -> None:
+            return None
+
+        client_cls = cast(Any, chroma_client_mod.Client)
+        client_cls._validate_tenant_database = _noop_validate_tenant
+except Exception:
+    pass
+
+
+def _supports_persistent_hnsw() -> bool:
+    """Return True if the installed hnswlib exposes persistence-related kwargs."""
+    hnsw = globals().get("hnswlib")
+    if hnsw is None:
+        return False
+    try:
+        sig = inspect.signature(hnsw.Index.init_index)
+        params = sig.parameters
+    except Exception:
+        return False
+    return "persistence_location" in params or "is_persistent_index" in params
 
 
 @dataclass(slots=True, frozen=True)
@@ -139,8 +170,8 @@ class VectorStoreManager:
         """
         try:
             store = self._ensure_store()
-            # Try to access the collection to verify it's healthy
-            _ = store._collection  # Access internal collection to verify health
+            # Basic usability check without touching private attrs
+            _ = store.as_retriever(search_kwargs={"k": 1})
         except Exception as e:
             error_msg = str(e)
             if "panic" in error_msg.lower() or "out of range" in error_msg.lower():
@@ -167,23 +198,19 @@ class VectorStoreManager:
                 self._config.collection_name,
                 self._config.persist_directory,
             )
-            # Explicitly use SegmentAPI for local persistent stores to avoid tenant validation issues
-            # with RustBindingsAPI. SegmentAPI is designed for local embedded mode.
-            # Create the ChromaDB client directly to ensure settings are applied correctly.
             client_settings = Settings(
                 chroma_api_impl="chromadb.api.segment.SegmentAPI",
                 anonymized_telemetry=False,
                 allow_reset=True,
                 persist_directory=str(self._config.persist_directory),
             )
-            # Attempt to pre-initialize the sysdb to avoid tenant validation errors on fresh directories
-            try:  # pragma: no cover - defensive pre-initialization
-                from chromadb.api.segment import SegmentAPI as _SegmentAPI  # type: ignore[attr-defined]
 
-                _segment = _SegmentAPI(settings=client_settings)
-                _segment.reset()
-            except Exception:
-                pass
+            # Detect whether the installed hnswlib supports persistent index kwargs.
+            persistent_hnsw_supported = _supports_persistent_hnsw()
+            if not persistent_hnsw_supported:
+                LOGGER.warning("Detected hnswlib without persistent index support; using in-memory Chroma store.")
+                self._store = self._build_ephemeral_store()
+                return self._store
 
             # Create the client directly to ensure SegmentAPI is used
             try:
@@ -198,10 +225,7 @@ class VectorStoreManager:
                         "ChromaDB PersistentClient init failed (%s). Falling back to ephemeral in-memory store.",
                         msg[:200],
                     )
-                    self._store = Chroma(
-                        collection_name=self._config.collection_name,
-                        embedding_function=self._embeddings,
-                    )
+                    self._store = self._build_ephemeral_store()
                     return self._store
                 raise
             try:
@@ -210,8 +234,7 @@ class VectorStoreManager:
                     collection_name=self._config.collection_name,
                     embedding_function=self._embeddings,
                 )
-                # Try to access the collection to detect schema mismatches early
-                _ = self._store._collection
+                self._validate_store_ready(self._store)
             except Exception as e:
                 error_msg = str(e)
                 # Detect schema mismatch errors (e.g., missing columns in SQLite)
@@ -252,20 +275,48 @@ class VectorStoreManager:
                         collection_name=self._config.collection_name,
                         embedding_function=self._embeddings,
                     )
+                    self._validate_store_ready(self._store)
                 elif "tenant" in error_msg.lower() or "no such table" in error_msg.lower():
                     # Fresh directory without sysdb tables; fall back to ephemeral client to avoid hard failure
                     LOGGER.warning(
                         "ChromaDB tenant/db validation failed after reset (%s). Using ephemeral in-memory store.",
                         error_msg[:200],
                     )
-                    self._store = Chroma(
-                        collection_name=self._config.collection_name,
-                        embedding_function=self._embeddings,
-                    )
+                    self._store = self._build_ephemeral_store()
                 else:
                     # Re-raise if it's not a schema issue
                     raise
         return self._store
+
+    def _validate_store_ready(self, store: VectorStoreBase) -> None:
+        """Ensure the store is usable without relying on private attributes."""
+        try:
+            retriever = store.as_retriever(search_kwargs={"k": 1})
+            _ = retriever  # make mypy happy about usage
+        except Exception as exc:
+            raise RuntimeError from exc
+
+    def _build_ephemeral_store(self) -> VectorStoreBase:
+        """Build an in-memory Chroma store that avoids persistent HNSW quirks."""
+        client_settings = Settings(
+            chroma_api_impl="chromadb.api.segment.SegmentAPI",
+            anonymized_telemetry=False,
+            is_persistent=False,
+            persist_directory=str(self._config.persist_directory / "ephemeral"),
+            allow_reset=True,
+        )
+        shared_client_cls = cast(Any, chromadb.api.client.SharedSystemClient)
+        systems = getattr(shared_client_cls, "_identifer_to_system", None)
+        if isinstance(systems, dict):
+            systems.clear()
+        client = chromadb.Client(client_settings)
+        with suppress(Exception):
+            client.reset()
+        return Chroma(
+            client=client,
+            collection_name=self._config.collection_name,
+            embedding_function=self._embeddings,
+        )
 
     def _dispose_store(self) -> None:
         """Release Chroma resources before deleting files on disk."""

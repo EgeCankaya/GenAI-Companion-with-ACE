@@ -62,13 +62,13 @@ dependencies = [
     "pandas>=2.0.0",
     "numpy>=1.24,<2.0",
     "matplotlib>=3.7.0",
-    # onnxruntime is a transitive dependency but only available for Python >= 3.10
-    # Exclude it for Python 3.9 to avoid installation failures
-    "onnxruntime>=1.20.1; python_version >= '3.10'",
 
     # Persistence
     "sqlalchemy>=2.0.0",
 ]
+
+[project.optional-dependencies]
+onnx = ["onnxruntime>=1.20.1; python_version >= '3.10'"]
 
 [project.scripts]
 genai-companion = "genai_companion_with_ace.cli:cli"
